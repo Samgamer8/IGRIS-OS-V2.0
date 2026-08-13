@@ -6,6 +6,12 @@ SPEAK = (
     "Add-Type -AssemblyName System.Speech;"
     "$t=[Console]::In.ReadToEnd();"
     "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer;"
+    "$v=$s.GetInstalledVoices()|%{$_.VoiceInfo.Name}|"
+    "?{$_ -match 'Jorge|Loquendo'}|Select-Object -First 1;"
+    "if($v){$s.SelectVoice($v)}else{"
+    "$es=$s.GetInstalledVoices()|%{$_.VoiceInfo}|"
+    "?{$_.Culture.Name -eq 'es-ES'}|Select-Object -First 1;"
+    "if($es){$s.SelectVoice($es.Name)}};"
     "$s.Speak($t)")
 
 LISTEN = (
