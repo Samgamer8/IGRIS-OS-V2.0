@@ -4,7 +4,8 @@ import queue
 import sys
 import threading
 
-from igris_os.application import AssistantService, MissionDirector
+from igris_os.application import AssistantService, MissionDirector, MissionRouter
+from igris_os.bootstrap import build_igris
 from igris_os.domain import Mission
 
 
@@ -26,7 +27,7 @@ def run_panel() -> int:
         from PyQt6.QtGui import QIcon, QPixmap
         from PyQt6.QtWidgets import (
             QApplication, QFrame, QHBoxLayout, QLabel, QLineEdit,
-            QMainWindow, QPushButton, QTextEdit, QVBoxLayout, QWidget,
+            QMainWindow, QMessageBox, QPushButton, QTextEdit, QVBoxLayout, QWidget,
         )
     except ImportError as exc:
         raise RuntimeError("PyQt6 no esta instalado") from exc
@@ -37,6 +38,8 @@ def run_panel() -> int:
             self.setWindowTitle("IGRIS OS V2.O — Modo Militar")
             self.resize(1500, 900)
             self.assistant = AssistantService()
+            self.router = MissionRouter()
+            self.kernel = build_igris()
             self.replies = queue.Queue()
             bundle = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[3]))
             assets = bundle / "assets"
@@ -104,19 +107,42 @@ def run_panel() -> int:
                 "\n".join(f"{i}. {step}" for i, step in enumerate(plan.steps, 1)))
             self.order.clear()
             self.order.setEnabled(False)
-            threading.Thread(target=self.ask_model, args=(objective,),
-                             daemon=True).start()
+            action = self.router.route(objective)
+            if action.kind == "capability":
+                accepted = QMessageBox.question(
+                    self, "Confirmar escritura",
+                    "IGRIS creara archivos dentro de un workspace aislado. ¿Continuar?")
+                if accepted != QMessageBox.StandardButton.Yes:
+                    self.console.append("\nSISTEMA: Operacion cancelada.")
+                    self.order.setEnabled(True)
+                    return
+                threading.Thread(
+                    target=self.run_capability,
+                    args=(objective, action.capability, action.payload),
+                    daemon=True).start()
+            else:
+                threading.Thread(target=self.ask_model, args=(objective,),
+                                 daemon=True).start()
 
         def ask_model(self, objective):
             self.replies.put(self.assistant.respond(objective))
+
+        def run_capability(self, objective, capability, payload):
+            self.replies.put(self.kernel.execute(
+                Mission(objective), capability, payload, confirmed=True))
 
         def poll_reply(self):
             try:
                 reply = self.replies.get_nowait()
             except queue.Empty:
                 return
-            prefix = f"[{reply.model}] " if reply.model else ""
-            self.console.append("\nIGRIS: " + prefix + reply.text)
+            model = getattr(reply, "model", "")
+            prefix = f"[{model}] " if model else ""
+            text = getattr(reply, "text", getattr(reply, "message", str(reply)))
+            self.console.append("\nIGRIS: " + prefix + text)
+            data = getattr(reply, "data", {})
+            if data:
+                self.console.append("RESULTADO: " + str(dict(data)))
             self.order.setEnabled(True)
             self.order.setFocus()
 
