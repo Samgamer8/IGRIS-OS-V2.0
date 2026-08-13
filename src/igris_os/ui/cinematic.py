@@ -88,6 +88,7 @@ def run_cinematic_panel():
         def __init__(self):
             super().__init__()
             self.items = []
+            self.file_receiver = None
 
         def place(self, widget, x, y, w, h):
             self.items.append((widget, x, y, w, h))
@@ -100,6 +101,17 @@ def run_cinematic_panel():
                 widget.setGeometry(round(x * sx), round(y * sy),
                                    round(w * sx), round(h * sy))
             super().resizeEvent(event)
+
+        def dragEnterEvent(self, event):
+            if event.mimeData().hasUrls():
+                event.acceptProposedAction()
+
+        def dropEvent(self, event):
+            if self.file_receiver:
+                paths = [url.toLocalFile() for url in event.mimeData().urls()
+                         if url.toLocalFile()]
+                self.file_receiver(paths)
+            event.acceptProposedAction()
 
     class Panel(QMainWindow):
         def __init__(self):
@@ -126,14 +138,16 @@ def run_cinematic_panel():
             self.canvas = Canvas()
             self.setCentralWidget(self.canvas)
             self.canvas.setAcceptDrops(True)
-            self.canvas.dragEnterEvent = self.drag_enter
-            self.canvas.dropEvent = self.drop_files
+            self.canvas.file_receiver = self.add_files
             self.build_visuals(
                 QFrame, QLabel, QPushButton, QTextEdit, PromptEdit, Dial,
                 QFont, QPixmap, Qt)
             self.timer = QTimer(self)
             self.timer.timeout.connect(self.tick)
             self.timer.start(100)
+            self.metrics_timer = QTimer(self)
+            self.metrics_timer.timeout.connect(self.update_metrics)
+            self.metrics_timer.start(1500)
 
         def build_visuals(self, QFrame, QLabel, QPushButton, QTextEdit,
                           PromptEdit, Dial, QFont, QPixmap, Qt):
@@ -263,6 +277,20 @@ def run_cinematic_panel():
             self.plan_label.setWordWrap(True)
             self.canvas.place(self.plan_label, 320, 92, 250, 72)
             self.plan_label.hide()
+            self.update_metrics()
+
+        def update_metrics(self):
+            try:
+                import psutil
+                cpu = round(psutil.cpu_percent(interval=None))
+                memory = round(psutil.virtual_memory().percent)
+            except ImportError:
+                return
+            self.dials[0].set_value(cpu)
+            self.dials[1].set_value(memory)
+            self.dials[2].set_value(max(0, 100 - cpu))
+            self.dials[3].set_value(100)
+            self.dials[4].set_value(100 if self.voice_enabled else 0)
 
         def submit(self):
             objective = self.prompt.toPlainText().strip()
@@ -318,7 +346,7 @@ def run_cinematic_panel():
                     self.prompt.setPlainText(heard)
                     self.submit()
                 else:
-                    self.chat.append("\n[VOZ] No se detectÃ³ una orden.")
+                    self.chat.append("\n[VOZ] No se detectó una orden.")
             try:
                 reply = self.replies.get_nowait()
             except queue.Empty:
@@ -345,14 +373,14 @@ def run_cinematic_panel():
             if capabilities:
                 lines = ["\n[CAPACIDADES ACTIVAS]"]
                 lines.extend(
-                    "â€¢ " + str(item.get("description", item.get("name", "")))
+                    "• " + str(item.get("description", item.get("name", "")))
                     for item in capabilities)
                 return "\n".join(lines)
             files = data.get("files")
             if files:
                 lines = ["\n[ARCHIVOS ANALIZADOS]"]
                 lines.extend(
-                    f"â€¢ {item.get('name', 'archivo')} â€” "
+                    f"• {item.get('name', 'archivo')} — "
                     f"{item.get('size', 0)} bytes" for item in files)
                 return "\n".join(lines)
             project = data.get("project")
@@ -374,8 +402,7 @@ def run_cinematic_panel():
             color = "#55dc76" if ok else "#efb74f"
             self.status.setStyleSheet(
                 f"color:{color};background:transparent;")
-            self.dials[0].set_value(100 if ok else 65)
-            self.dials[1].set_value(min(100, self.command_count * 7))
+            self.update_metrics()
 
         def show_military(self):
             self.plan_label.setVisible(not self.plan_label.isVisible())
@@ -416,9 +443,6 @@ def run_cinematic_panel():
                 row["content"].get("role", "?") + ": " +
                 row["content"].get("text", "")[:100] for row in rows)
             self.chat.append("\n[MEMORIA] " + summary)
-            return
-            self.chat.append(
-                f"\n[MEMORIA] Sesión actual: {self.command_count} órdenes.")
 
         def memory_context(self):
             rows = list(reversed(self.memory.recent("chat", limit=8)))
@@ -427,7 +451,6 @@ def run_cinematic_panel():
                 row["content"].get("text", "")[:1000] for row in rows)
 
         def pick_files(self):
-            
             paths, _ = QFileDialog.getOpenFileNames(
                 self, "Adjuntar archivos a IGRIS")
             self.add_files(paths)
@@ -439,15 +462,6 @@ def run_cinematic_panel():
             if paths:
                 self.chat.append(
                     "\n[ADJUNTOS] " + ", ".join(Path(p).name for p in paths))
-
-        def drag_enter(self, event):
-            if event.mimeData().hasUrls():
-                event.acceptProposedAction()
-
-        def drop_files(self, event):
-            self.add_files([url.toLocalFile() for url in event.mimeData().urls()
-                            if url.toLocalFile()])
-            event.acceptProposedAction()
 
     app = QApplication([])
     app.setStyle("Fusion")

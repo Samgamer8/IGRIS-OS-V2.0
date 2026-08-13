@@ -13,6 +13,9 @@ def test_godot_project_requires_confirmation(tmp_path):
         factory.create("Juego")
     project = factory.create("Juego IGRIS", confirmed=True)
     assert factory.validate(project)
+    script = (project / "main.gd").read_text(encoding="utf-8")
+    assert "Input.get_vector" in script
+    assert (project / "VERIFICATION.json").is_file()
 
 
 def test_javascript_syntax_when_node_available(tmp_path):

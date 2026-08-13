@@ -48,3 +48,15 @@ def test_capability_question_uses_real_catalog():
     action = MissionRouter().route("que puedes hacer y cuales son tus funciones")
     assert action.capability == "system.capabilities"
     assert not action.requires_confirmation
+
+
+def test_accented_capability_question_is_recognized():
+    assert MissionRouter().route(
+        "¿qué puedes hacer?").capability == "system.capabilities"
+
+
+def test_unicode_dimensions_are_recognized():
+    action = MissionRouter().route(
+        "redimensiona a 640×480", ["foto.png"])
+    assert action.payload["width"] == 640
+    assert action.payload["height"] == 480

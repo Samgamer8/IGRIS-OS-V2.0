@@ -18,6 +18,7 @@ def main() -> int:
     if not compileall.compile_dir(ROOT / "src", quiet=1):
         return 1
     run([sys.executable, "-m", "pytest"])
+    run([sys.executable, "tools/release_check.py"])
     env = os.environ.copy()
     env.update({"PYTHONPATH": "src", "QT_QPA_PLATFORM": "offscreen",
                 "IGRIS_TEST_GUI": "1", "PYTHONDONTWRITEBYTECODE": "1"})

@@ -17,13 +17,14 @@ PROFILES = {
     "python": LanguageProfile("python", (".py",), sys.executable,
                               ("-I", "-m", "py_compile")),
     "javascript": LanguageProfile("javascript", (".js",), "node", ("--check",)),
-    "typescript": LanguageProfile("typescript", (".ts", ".tsx"), "npx",
-                                  ("tsc", "--noEmit", "--pretty", "false")),
+    "typescript": LanguageProfile("typescript", (".ts", ".tsx"), "tsc",
+                                  ("--noEmit", "--pretty", "false")),
     "rust": LanguageProfile("rust", (".rs",), "rustc",
                             ("--crate-type", "lib", "--emit", "metadata")),
     "cpp": LanguageProfile("cpp", (".cpp", ".cc"), "g++",
                            ("-fsyntax-only",)),
-    "java": LanguageProfile("java", (".java",), "javac", ("-Xlint",)),
+    "java": LanguageProfile("java", (".java",), "javac",
+                            ("-proc:none", "-Xlint")),
 }
 
 

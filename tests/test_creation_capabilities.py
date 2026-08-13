@@ -48,3 +48,15 @@ def test_inspect_files_returns_hash_and_text_preview(tmp_path):
     assert item["name"] == "code.py"
     assert item["preview"] == "print('IGRIS')"
     assert len(item["sha256"]) == 64
+
+
+def test_inspect_files_caps_file_count(tmp_path):
+    sources = []
+    for index in range(55):
+        path = tmp_path / f"{index}.txt"
+        path.write_text("x", encoding="utf-8")
+        sources.append(str(path))
+    result = build_igris(tmp_path / "runtime").execute(
+        Mission("analiza"), "files.inspect", {"sources": sources})
+    assert result.ok
+    assert len(result.data["files"]) == 50

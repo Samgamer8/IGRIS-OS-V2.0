@@ -8,7 +8,11 @@ from pathlib import Path
 
 
 FORBIDDEN = {"eval", "exec", "compile", "__import__"}
-FORBIDDEN_IMPORTS = {"subprocess", "socket", "ctypes"}
+FORBIDDEN_IMPORTS = {"subprocess", "socket", "ctypes", "shutil"}
+FORBIDDEN_ATTRIBUTES = {
+    "system", "popen", "spawn", "remove", "removedirs", "rmdir",
+    "unlink", "rmtree", "rename", "replace", "chmod", "chown",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,17 +29,26 @@ class PythonWorkshop:
 
     def verify(self, source: str, tests: str) -> Verification:
         try:
-            tree = ast.parse(source)
-            ast.parse(tests)
+            trees = (ast.parse(source), ast.parse(tests))
         except SyntaxError as exc:
             return Verification(False, f"SyntaxError: {exc}")
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.Import, ast.ImportFrom)):
-                names = [a.name.split(".")[0] for a in node.names] if isinstance(node, ast.Import) else [str(node.module).split(".")[0]]
-                if FORBIDDEN_IMPORTS.intersection(names):
-                    return Verification(False, "Importacion peligrosa")
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in FORBIDDEN:
-                return Verification(False, "Ejecucion dinamica bloqueada")
+        for tree in trees:
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.Import, ast.ImportFrom)):
+                    names = ([a.name.split(".")[0] for a in node.names]
+                             if isinstance(node, ast.Import)
+                             else [str(node.module).split(".")[0]])
+                    if FORBIDDEN_IMPORTS.intersection(names):
+                        return Verification(False, "Importacion peligrosa")
+                if isinstance(node, ast.Call):
+                    if (isinstance(node.func, ast.Name) and
+                            node.func.id in FORBIDDEN):
+                        return Verification(
+                            False, "Ejecucion dinamica bloqueada")
+                    if (isinstance(node.func, ast.Attribute) and
+                            node.func.attr in FORBIDDEN_ATTRIBUTES):
+                        return Verification(
+                            False, "Operacion de sistema bloqueada")
         self.root.mkdir(parents=True, exist_ok=True)
         (self.root / "solution.py").write_text(source, encoding="utf-8")
         (self.root / "test_solution.py").write_text(tests, encoding="utf-8")

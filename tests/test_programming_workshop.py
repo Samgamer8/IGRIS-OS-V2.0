@@ -26,3 +26,19 @@ def test_dangerous_code_is_blocked(tmp_path):
     result = PythonWorkshop(tmp_path).verify(
         "import subprocess\n", "import unittest\n")
     assert not result.ok
+
+
+def test_generated_tests_are_security_checked(tmp_path):
+    result = PythonWorkshop(tmp_path).verify(
+        "def ok(): return True\n",
+        "import shutil\nshutil.rmtree('datos')\n")
+    assert not result.ok
+    assert "peligrosa" in result.message
+
+
+def test_destructive_attribute_calls_are_blocked(tmp_path):
+    result = PythonWorkshop(tmp_path).verify(
+        "from pathlib import Path\ndef clean(): Path('x').unlink()\n",
+        "import unittest\n")
+    assert not result.ok
+    assert "sistema" in result.message

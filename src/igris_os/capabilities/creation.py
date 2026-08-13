@@ -95,6 +95,8 @@ def _media_status(payload):
 
 def _inspect_files(payload):
     inspected = []
+    total_read = 0
+    max_total = 32 * 1024 * 1024
     for raw in list(payload.get("sources", []))[:50]:
         path = Path(str(raw)).resolve()
         if not path.is_file() or path.is_symlink():
@@ -103,8 +105,9 @@ def _inspect_files(payload):
         item = {"name": path.name, "path": str(path), "size": size,
                 "mime": mimetypes.guess_type(path.name)[0] or
                         "application/octet-stream"}
-        if size <= 16 * 1024 * 1024:
+        if size <= 16 * 1024 * 1024 and total_read + size <= max_total:
             data = path.read_bytes()
+            total_read += size
             item["sha256"] = hashlib.sha256(data).hexdigest()
             if item["mime"].startswith("text/") or path.suffix.casefold() in {
                     ".py", ".js", ".ts", ".json", ".md", ".txt", ".csv"}:

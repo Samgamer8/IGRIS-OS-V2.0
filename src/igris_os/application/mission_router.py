@@ -20,7 +20,7 @@ class MissionRouter:
         plan = MissionDirector().plan(Mission(objective))
         low = objective.casefold()
         if any(phrase in low for phrase in (
-                "tus funciones", "tus capacidades", "quÃ© puedes hacer",
+                "tus funciones", "tus capacidades", "qué puedes hacer",
                 "que puedes hacer", "capacidades tienes")):
             return RoutedAction("capability", "system.capabilities")
         if any(phrase in low for phrase in (
@@ -76,7 +76,7 @@ class MissionRouter:
 
 def _dimensions(text: str) -> tuple[int, int]:
     import re
-    match = re.search(r"(\d{2,5})\s*[xÃ—]\s*(\d{2,5})", text)
+    match = re.search(r"(\d{2,5})\s*[x×]\s*(\d{2,5})", text)
     if not match:
         return 1280, 720
     return min(16384, int(match.group(1))), min(16384, int(match.group(2)))
