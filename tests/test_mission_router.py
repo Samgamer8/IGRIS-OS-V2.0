@@ -14,3 +14,25 @@ def test_game_creation_routes_to_godot():
 
 def test_general_request_routes_to_chat():
     assert MissionRouter().route("explica la historia").kind == "chat"
+
+
+def test_attached_image_routes_to_resize():
+    action = MissionRouter().route(
+        "redimensiona esta imagen a 800x600", ["foto.png"])
+    assert action.capability == "image.resize"
+    assert action.payload["width"] == 800
+    assert action.payload["height"] == 600
+    assert action.requires_confirmation
+
+
+def test_attached_video_routes_to_audio_extraction():
+    action = MissionRouter().route("extrae audio", ["video.mp4"])
+    assert action.capability == "multimedia.extract_audio"
+
+
+def test_multiple_attachments_route_to_read_only_inspection():
+    action = MissionRouter().route(
+        "analiza estos archivos", ["uno.py", "dos.md"])
+    assert action.capability == "files.inspect"
+    assert len(action.payload["sources"]) == 2
+    assert not action.requires_confirmation

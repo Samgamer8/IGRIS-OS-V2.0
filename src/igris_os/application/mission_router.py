@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
-from typing import Any
+from pathlib import Path
+from typing import Any, Sequence
 
 from igris_os.application.director import MissionDirector
 from igris_os.domain import Mission, MissionBranch
@@ -14,9 +15,34 @@ class RoutedAction:
 
 
 class MissionRouter:
-    def route(self, objective: str) -> RoutedAction:
+    def route(self, objective: str,
+              attachments: Sequence[str] = ()) -> RoutedAction:
         plan = MissionDirector().plan(Mission(objective))
         low = objective.casefold()
+        source = str(Path(attachments[0]).resolve()) if attachments else ""
+        if source and any(word in low for word in ("redimensiona", "resize", "escala")):
+            width, height = _dimensions(low)
+            return RoutedAction(
+                "capability", "image.resize",
+                {"source": source, "output": "imagen_redimensionada.png",
+                 "width": width, "height": height}, True)
+        if source and any(word in low for word in ("extrae audio", "extraer audio", "a mp3")):
+            return RoutedAction(
+                "capability", "multimedia.extract_audio",
+                {"source": source, "output": "audio_extraido.mp3"}, True)
+        if source and any(word in low for word in ("miniatura", "fotograma", "thumbnail")):
+            return RoutedAction(
+                "capability", "multimedia.thumbnail",
+                {"source": source, "output": "miniatura.png"}, True)
+        if source and any(word in low for word in ("convierte", "transcodifica", "a mp4")):
+            return RoutedAction(
+                "capability", "multimedia.transcode",
+                {"source": source, "output": "video_convertido.mp4"}, True)
+        if attachments and any(word in low for word in (
+                "analiza", "revisa", "inspecciona", "resume", "archivos")):
+            return RoutedAction(
+                "capability", "files.inspect",
+                {"sources": [str(Path(item).resolve()) for item in attachments]})
         if plan.branch is MissionBranch.PROGRAMMING and "python" in low:
             return RoutedAction(
                 "capability", "programming.python.develop",
@@ -27,6 +53,14 @@ class MissionRouter:
                 "capability", "games.godot.scaffold",
                 {"name": _project_name(objective)}, True)
         return RoutedAction("chat")
+
+
+def _dimensions(text: str) -> tuple[int, int]:
+    import re
+    match = re.search(r"(\d{2,5})\s*[xÃ—]\s*(\d{2,5})", text)
+    if not match:
+        return 1280, 720
+    return min(16384, int(match.group(1))), min(16384, int(match.group(2)))
 
 
 def _project_name(objective: str) -> str:

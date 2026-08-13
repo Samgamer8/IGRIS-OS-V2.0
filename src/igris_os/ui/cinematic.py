@@ -273,9 +273,11 @@ def run_cinematic_panel():
             self.status.setStyleSheet("color:#ffbe55;background:transparent;")
             self.galaxy.set_busy(True)
             self.prompt.setEnabled(False)
-            action = self.router.route(objective)
+            action = self.router.route(objective, self.attachments)
             if action.kind == "capability":
-                answer = QMessageBox.question(
+                answer = QMessageBox.StandardButton.Yes
+                if action.requires_confirmation:
+                    answer = QMessageBox.question(
                     self, "Confirmar misión",
                     "IGRIS creará archivos en un workspace aislado. ¿Continuar?")
                 if answer != QMessageBox.StandardButton.Yes:
