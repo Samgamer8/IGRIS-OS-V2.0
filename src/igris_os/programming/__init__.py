@@ -5,3 +5,6 @@ __all__ = ["LanguageCheck", "LanguageProfile", "LanguageVerifier",
            "DevelopmentResult", "PythonProjectDeveloper",
            "PythonWorkshop", "Verification"]
 from .developer import DevelopmentResult, PythonProjectDeveloper
+from .multilang import MultiLanguageDeveloper, MultiLanguageResult
+
+__all__ += ["MultiLanguageDeveloper", "MultiLanguageResult"]

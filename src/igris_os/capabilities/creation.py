@@ -7,7 +7,9 @@ from igris_os.application import CapabilityRegistry
 from igris_os.domain import ActionRisk, CapabilitySpec, ExecutionResult
 from igris_os.games import GodotProjectFactory
 from igris_os.multimedia import ImageEngine, MediaEngine
-from igris_os.programming import LanguageVerifier, PythonProjectDeveloper
+from igris_os.programming import (
+    LanguageVerifier, MultiLanguageDeveloper, PythonProjectDeveloper,
+)
 
 
 def register_creation_capabilities(registry: CapabilityRegistry) -> None:
@@ -18,6 +20,10 @@ def register_creation_capabilities(registry: CapabilityRegistry) -> None:
         CapabilitySpec("programming.python.develop",
                        "Genera, prueba y entrega un proyecto Python",
                        ActionRisk.WRITE_WORKSPACE, True), _develop_python)
+    registry.register(
+        CapabilitySpec("programming.multilang.develop",
+                       "Genera y verifica un proyecto en varios lenguajes",
+                       ActionRisk.WRITE_WORKSPACE, True), _develop_multilang)
     registry.register(
         CapabilitySpec("games.godot.scaffold",
                        "Crea una base de proyecto Godot",
@@ -58,6 +64,20 @@ def _develop_python(payload):
         return ExecutionResult.failure(result.message, "DEVELOPMENT_FAILED")
     return ExecutionResult.success(result.message, project=result.project,
                                    attempts=result.attempts)
+
+
+def _develop_multilang(payload):
+    objective = str(payload.get("objective", "")).strip()
+    language = str(payload.get("language", "")).strip()
+    model = str(payload.get("model", "qwen2.5-coder:7b"))
+    client = OllamaClient(timeout=float(payload.get("timeout", 180)))
+    result = MultiLanguageDeveloper(
+        client, Path(payload["workspace"]), model).develop(
+            objective, language, confirmed=True)
+    if not result.ok:
+        return ExecutionResult.failure(result.message, "DEVELOPMENT_FAILED")
+    return ExecutionResult.success(result.message, project=result.project,
+                                   attempts=result.attempts, language=language)
 
 
 def _godot(payload):

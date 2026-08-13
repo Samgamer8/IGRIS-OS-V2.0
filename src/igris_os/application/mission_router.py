@@ -47,6 +47,17 @@ class MissionRouter:
             return RoutedAction(
                 "capability", "programming.python.develop",
                 {"objective": objective}, True)
+        languages = {
+            "javascript": ("javascript", "node.js", "nodejs"),
+            "typescript": ("typescript",), "rust": ("rust",),
+            "cpp": ("c++", "cpp"), "java": ("java",),
+        }
+        if plan.branch is MissionBranch.PROGRAMMING:
+            for language, aliases in languages.items():
+                if any(alias in low for alias in aliases):
+                    return RoutedAction(
+                        "capability", "programming.multilang.develop",
+                        {"objective": objective, "language": language}, True)
         if plan.branch is MissionBranch.GAMES and any(
                 word in low for word in ("crea", "construye", "genera")):
             return RoutedAction(

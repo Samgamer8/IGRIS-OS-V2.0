@@ -36,3 +36,9 @@ def test_multiple_attachments_route_to_read_only_inspection():
     assert action.capability == "files.inspect"
     assert len(action.payload["sources"]) == 2
     assert not action.requires_confirmation
+
+
+def test_javascript_creation_routes_to_multilang_developer():
+    action = MissionRouter().route("crea un programa JavaScript de tareas")
+    assert action.capability == "programming.multilang.develop"
+    assert action.payload["language"] == "javascript"
