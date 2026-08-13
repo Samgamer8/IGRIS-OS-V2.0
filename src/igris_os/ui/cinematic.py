@@ -103,7 +103,9 @@ def run_cinematic_panel():
         def __init__(self):
             super().__init__()
             self.setWindowTitle("IGRIS OS — Modo Militar")
-            self.resize(1600, 900)
+            # Arranque cómodo en pantallas 1080p; el lienzo conserva su
+            # proporción y puede ampliarse manualmente cuando se necesite.
+            self.resize(1440, 810)
             self.setMinimumSize(1100, 619)
             icon = asset_path("igris_icon_v2.ico")
             if icon:
