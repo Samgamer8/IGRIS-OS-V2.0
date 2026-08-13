@@ -7,6 +7,7 @@ import threading
 from igris_os.application import AssistantService, MissionDirector, MissionRouter
 from igris_os.bootstrap import build_igris
 from igris_os.domain import Mission
+from igris_os.memory import MemoryStore
 from igris_os.ui.galaxia import GalaxiaWidget
 
 
@@ -114,6 +115,7 @@ def run_cinematic_panel():
             self.director = MissionDirector()
             self.router = MissionRouter()
             self.kernel = build_igris()
+            self.memory = MemoryStore(Path("runtime") / "memory" / "chat.db")
             self.replies = queue.Queue()
             self.command_count = 0
             self.attachments = []
@@ -264,6 +266,8 @@ def run_cinematic_panel():
             self.command_count += 1
             self.dials[5].set_value(min(100, self.command_count))
             self.chat.append(f"\n[USUARIO] {objective}")
+            self.memory.remember(
+                "chat", {"role": "user", "text": objective}, verified=True)
             plan = self.director.plan(Mission(objective))
             self.plan_label.setText(
                 "MISIÓN: " + plan.branch.value.upper() + "\n" +
@@ -289,8 +293,8 @@ def run_cinematic_panel():
                     daemon=True).start()
             else:
                 threading.Thread(
-                    target=lambda: self.replies.put(
-                        self.assistant.respond(objective)),
+                    target=lambda: self.replies.put(self.assistant.respond(
+                        objective, self.memory_context())),
                     daemon=True).start()
 
         def run_capability(self, objective, capability, payload):
@@ -306,6 +310,9 @@ def run_cinematic_panel():
             model = getattr(reply, "model", "")
             self.chat.append(f"\n[IGRIS{(' · ' + model) if model else ''}] {text}")
             data = getattr(reply, "data", {})
+            self.memory.remember(
+                "chat", {"role": "igris", "text": text,
+                         "ok": bool(getattr(reply, "ok", False))}, verified=True)
             if data:
                 self.chat.append("[RESULTADO] " + str(dict(data)))
             self.finish_message("", bool(getattr(reply, "ok", False)))
@@ -339,10 +346,26 @@ def run_cinematic_panel():
                 "reparar y entregar evidencia.")
 
         def show_memory(self):
+            rows = list(reversed(self.memory.recent("chat", limit=6)))
+            if not rows:
+                self.chat.append("\n[MEMORIA] Sin recuerdos verificados.")
+                return
+            summary = " | ".join(
+                row["content"].get("role", "?") + ": " +
+                row["content"].get("text", "")[:100] for row in rows)
+            self.chat.append("\n[MEMORIA] " + summary)
+            return
             self.chat.append(
                 f"\n[MEMORIA] Sesión actual: {self.command_count} órdenes.")
 
+        def memory_context(self):
+            rows = list(reversed(self.memory.recent("chat", limit=8)))
+            return tuple(
+                row["content"].get("role", "?") + ": " +
+                row["content"].get("text", "")[:1000] for row in rows)
+
         def pick_files(self):
+            
             paths, _ = QFileDialog.getOpenFileNames(
                 self, "Adjuntar archivos a IGRIS")
             self.add_files(paths)

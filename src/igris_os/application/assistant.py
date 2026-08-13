@@ -33,7 +33,8 @@ class AssistantService:
         return next((name for name in preferred if name in installed),
                     installed[0] if installed else "")
 
-    def respond(self, objective: str) -> AssistantReply:
+    def respond(self, objective: str,
+                context: tuple[str, ...] = ()) -> AssistantReply:
         if not objective.strip():
             return AssistantReply(False, "Escribe una orden.")
         plan = self.director.plan(Mission(objective))
@@ -41,7 +42,9 @@ class AssistantService:
         if not model:
             return AssistantReply(
                 False, "Ollama no esta disponible o no tiene modelos instalados.")
+        memory = "\n".join(context[-8:])
         prompt = (SYSTEM + "\nRAMA: " + plan.branch.value +
+                  ("\nCONTEXTO LOCAL VERIFICADO:\n" + memory if memory else "") +
                   "\nORDEN DEL USUARIO:\n" + objective)
         reply = self.client.generate(prompt, model)
         return AssistantReply(reply.ok, reply.text if reply.ok else reply.error, model)

@@ -42,3 +42,9 @@ class MemoryStore:
             cursor = db.execute("UPDATE memories SET verified=1 WHERE id=?", (memory_id,))
             if not cursor.rowcount:
                 raise KeyError(memory_id)
+
+    def recent(self, category: str, *, limit: int = 20,
+               verified_only: bool = True) -> list[dict]:
+        if limit < 1 or limit > 500:
+            raise ValueError("Limite invalido")
+        return self.recall(category, verified_only=verified_only)[:limit]
