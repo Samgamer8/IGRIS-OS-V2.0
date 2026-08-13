@@ -9,6 +9,7 @@ from igris_os.bootstrap import build_igris
 from igris_os.domain import Mission
 from igris_os.memory import MemoryStore
 from igris_os.ui.galaxia import GalaxiaWidget
+from igris_os.voice import WindowsVoice
 
 
 def asset_path(name):
@@ -116,6 +117,9 @@ def run_cinematic_panel():
             self.router = MissionRouter()
             self.kernel = build_igris()
             self.memory = MemoryStore(Path("runtime") / "memory" / "chat.db")
+            self.voice_engine = WindowsVoice()
+            self.voice_enabled = True
+            self.voice_inputs = queue.Queue()
             self.replies = queue.Queue()
             self.command_count = 0
             self.attachments = []
@@ -208,9 +212,11 @@ def run_cinematic_panel():
                 "border:1px solid #651522;border-radius:8px;font-weight:bold;}"
                 "QPushButton:hover{background:#83162a;}")
             self.voice = QPushButton("V", self.canvas)
-            self.voice.setToolTip("Voz local (proxima integracion)")
+            self.voice.setToolTip("Activar o desactivar voz local")
+            self.voice.clicked.connect(self.toggle_voice)
             self.mic = QPushButton("MIC", self.canvas)
-            self.mic.setToolTip("Microfono")
+            self.mic.setToolTip("Dictar una orden durante 8 segundos")
+            self.mic.clicked.connect(self.listen_voice)
             self.attach = QPushButton("+", self.canvas)
             self.attach.setToolTip("Adjuntar archivos")
             self.attach.clicked.connect(self.pick_files)
@@ -303,6 +309,17 @@ def run_cinematic_panel():
 
         def tick(self):
             try:
+                heard = self.voice_inputs.get_nowait()
+            except queue.Empty:
+                heard = None
+            if heard is not None:
+                self.mic.setEnabled(True)
+                if heard:
+                    self.prompt.setPlainText(heard)
+                    self.submit()
+                else:
+                    self.chat.append("\n[VOZ] No se detectÃ³ una orden.")
+            try:
                 reply = self.replies.get_nowait()
             except queue.Empty:
                 return
@@ -310,6 +327,10 @@ def run_cinematic_panel():
             model = getattr(reply, "model", "")
             self.chat.append(f"\n[IGRIS{(' · ' + model) if model else ''}] {text}")
             data = getattr(reply, "data", {})
+            if self.voice_enabled:
+                threading.Thread(
+                    target=self.voice_engine.speak, args=(text,),
+                    daemon=True).start()
             self.memory.remember(
                 "chat", {"role": "igris", "text": text,
                          "ok": bool(getattr(reply, "ok", False))}, verified=True)
@@ -339,6 +360,19 @@ def run_cinematic_panel():
             self.chat.append(
                 "\n[LABORATORIO] Capacidades activas: " +
                 ", ".join(spec.name for spec in specs))
+
+        def toggle_voice(self):
+            self.voice_enabled = not self.voice_enabled
+            self.dials[4].set_value(100 if self.voice_enabled else 0)
+            state = "activada" if self.voice_enabled else "desactivada"
+            self.chat.append("\n[VOZ] Voz local " + state + ".")
+
+        def listen_voice(self):
+            self.mic.setEnabled(False)
+            self.chat.append("\n[VOZ] Escuchando...")
+            threading.Thread(
+                target=lambda: self.voice_inputs.put(
+                    self.voice_engine.listen()), daemon=True).start()
 
         def show_academy(self):
             self.chat.append(
