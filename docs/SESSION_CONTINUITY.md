@@ -26,7 +26,14 @@ sin inventario, pruebas y autorización expresa.
 - Programación Python con pruebas y reparación; JavaScript, TypeScript, Rust,
   C++ y Java con verificación de herramientas locales.
 - Adjuntos: análisis, imagen, extracción de audio, miniatura y transcodificación.
-- Godot: creación confinada de proyecto base.
+- Godot: plantilla 2D jugable, confinada y con evidencia de verificación.
+
+## Última entrega verificada
+
+- Pruebas: 69 aprobadas.
+- Release check: aprobado.
+- Portable probado desde un directorio externo: aprobado.
+- SHA-256: `F6262CE6F57FA9D0B01E70E7872DA82775DC470EC7D207A0980DE5A701D44A13`.
 - Voz y dictado locales; voz preferida Microsoft Pablo (español masculino).
 - Auditoría JSONL, workspaces por misión y política central de permisos.
 - Evolución: candidatos medidos, sin autopromoción directa a producción.
