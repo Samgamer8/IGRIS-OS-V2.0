@@ -1,4 +1,5 @@
 import subprocess
+from pathlib import Path
 
 
 SPEAK = (
@@ -18,6 +19,21 @@ LISTEN = (
 
 
 class WindowsVoice:
+    def play_sample(self, path: Path) -> bool:
+        if not path.is_file() or path.suffix.casefold() != ".wav":
+            return False
+        script = (
+            "$p=$args[0];$s=New-Object Media.SoundPlayer $p;"
+            "$s.PlaySync()")
+        try:
+            subprocess.Popen(
+                ["powershell.exe", "-NoProfile", "-Command", script,
+                 str(path.resolve())], stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL)
+            return True
+        except OSError:
+            return False
+
     def speak(self, text: str) -> bool:
         if not text.strip():
             return False

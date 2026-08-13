@@ -366,6 +366,9 @@ def run_cinematic_panel():
             self.dials[4].set_value(100 if self.voice_enabled else 0)
             state = "activada" if self.voice_enabled else "desactivada"
             self.chat.append("\n[VOZ] Voz local " + state + ".")
+            sample = asset_path("igris_voice_identity.wav")
+            if self.voice_enabled and sample:
+                self.voice_engine.play_sample(sample)
 
         def listen_voice(self):
             self.mic.setEnabled(False)
