@@ -335,8 +335,33 @@ def run_cinematic_panel():
                 "chat", {"role": "igris", "text": text,
                          "ok": bool(getattr(reply, "ok", False))}, verified=True)
             if data:
-                self.chat.append("[RESULTADO] " + str(dict(data)))
+                rendered = self.render_result(dict(data))
+                if rendered:
+                    self.chat.append(rendered)
             self.finish_message("", bool(getattr(reply, "ok", False)))
+
+        def render_result(self, data):
+            capabilities = data.get("capabilities")
+            if capabilities:
+                lines = ["\n[CAPACIDADES ACTIVAS]"]
+                lines.extend(
+                    "â€¢ " + str(item.get("description", item.get("name", "")))
+                    for item in capabilities)
+                return "\n".join(lines)
+            files = data.get("files")
+            if files:
+                lines = ["\n[ARCHIVOS ANALIZADOS]"]
+                lines.extend(
+                    f"â€¢ {item.get('name', 'archivo')} â€” "
+                    f"{item.get('size', 0)} bytes" for item in files)
+                return "\n".join(lines)
+            project = data.get("project")
+            if project:
+                return "\n[PROYECTO ENTREGADO] " + str(project)
+            output = data.get("output")
+            if output:
+                return "\n[ARCHIVO GENERADO] " + str(output)
+            return ""
 
         def finish_message(self, text, ok):
             if text:
