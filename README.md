@@ -23,7 +23,12 @@ Primera base ejecutable:
 - proveedor Ollama local;
 - adaptadores detectables para FFmpeg, Blender, Godot y Git;
 - laboratorio de evolucion con promocion solo por mejora medida;
-- panel militar PyQt6 conectado al director de misiones.
+- panel militar PyQt6 conectado al director de misiones;
+- voz masculina española Microsoft Pablo y dictado local de Windows;
+- memoria persistente y auditoría consultable de misiones;
+- adjuntos conectados a análisis, imagen, vídeo y audio;
+- plantilla Godot 2D jugable con verificación;
+- esquema de continuidad en `docs/SESSION_CONTINUITY.md`.
 
 ## Uso de desarrollo
 

@@ -18,6 +18,39 @@ def asset_path(name):
     return path if path.is_file() else None
 
 
+def runtime_root():
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent / "runtime"
+    return Path(__file__).resolve().parents[3] / "runtime"
+
+
+def format_result(data):
+    if data.get("capabilities"):
+        return "\n[CAPACIDADES ACTIVAS]\n" + "\n".join(
+            "• " + str(item.get("description", item.get("name", "")))
+            for item in data["capabilities"])
+    if data.get("tools"):
+        return "\n[HERRAMIENTAS LOCALES]\n" + "\n".join(
+            f"• {item.get('name', 'herramienta')}: " +
+            ("disponible" if item.get("available") else "no instalada")
+            for item in data["tools"])
+    if data.get("languages"):
+        return "\n[LENGUAJES REGISTRADOS]\n" + "\n".join(
+            "• " + str(item.get("name", "")) for item in data["languages"])
+    if data.get("files"):
+        return "\n[ARCHIVOS ANALIZADOS]\n" + "\n".join(
+            f"• {item.get('name', 'archivo')} — {item.get('size', 0)} bytes"
+            for item in data["files"])
+    if data.get("project"):
+        return "\n[PROYECTO ENTREGADO] " + str(data["project"])
+    if data.get("output"):
+        return "\n[ARCHIVO GENERADO] " + str(data["output"])
+    if "cpu_percent" in data:
+        return ("\n[ESTADO REAL] CPU: " + str(data.get("cpu_percent")) +
+                "% · Memoria: " + str(data.get("memory_percent")) + "%")
+    return ""
+
+
 def run_cinematic_panel():
     from PyQt6.QtCore import Qt, QTimer, QRectF
     from PyQt6.QtGui import (
@@ -127,8 +160,9 @@ def run_cinematic_panel():
             self.assistant = AssistantService()
             self.director = MissionDirector()
             self.router = MissionRouter()
-            self.kernel = build_igris()
-            self.memory = MemoryStore(Path("runtime") / "memory" / "chat.db")
+            self.runtime = runtime_root()
+            self.kernel = build_igris(self.runtime)
+            self.memory = MemoryStore(self.runtime / "memory" / "chat.db")
             self.voice_engine = WindowsVoice()
             self.voice_enabled = True
             self.voice_inputs = queue.Queue()
@@ -235,8 +269,8 @@ def run_cinematic_panel():
             self.attach.setToolTip("Adjuntar archivos")
             self.attach.clicked.connect(self.pick_files)
             self.clear = QPushButton("R", self.canvas)
-            self.clear.setToolTip("Limpiar chat")
-            self.clear.clicked.connect(self.chat.clear)
+            self.clear.setToolTip("Reiniciar vista y quitar adjuntos")
+            self.clear.clicked.connect(self.reset_view)
             for index, button in enumerate(
                     (self.voice, self.mic, self.attach, self.clear)):
                 button.setStyleSheet(top_style)
@@ -369,27 +403,7 @@ def run_cinematic_panel():
             self.finish_message("", bool(getattr(reply, "ok", False)))
 
         def render_result(self, data):
-            capabilities = data.get("capabilities")
-            if capabilities:
-                lines = ["\n[CAPACIDADES ACTIVAS]"]
-                lines.extend(
-                    "• " + str(item.get("description", item.get("name", "")))
-                    for item in capabilities)
-                return "\n".join(lines)
-            files = data.get("files")
-            if files:
-                lines = ["\n[ARCHIVOS ANALIZADOS]"]
-                lines.extend(
-                    f"• {item.get('name', 'archivo')} — "
-                    f"{item.get('size', 0)} bytes" for item in files)
-                return "\n".join(lines)
-            project = data.get("project")
-            if project:
-                return "\n[PROYECTO ENTREGADO] " + str(project)
-            output = data.get("output")
-            if output:
-                return "\n[ARCHIVO GENERADO] " + str(output)
-            return ""
+            return format_result(data)
 
         def finish_message(self, text, ok):
             if text:
@@ -408,10 +422,15 @@ def run_cinematic_panel():
             self.plan_label.setVisible(not self.plan_label.isVisible())
 
         def show_laboratory(self):
-            specs = self.kernel.registry.specs()
-            self.chat.append(
-                "\n[LABORATORIO] Capacidades activas: " +
-                ", ".join(spec.name for spec in specs))
+            events = self.kernel.audit.recent(8)
+            if not events:
+                self.chat.append("\n[LABORATORIO] Aún no hay misiones ejecutadas.")
+                return
+            lines = ["\n[LABORATORIO · MISIONES RECIENTES]"]
+            for event in events:
+                state = "OK" if event.get("ok") else event.get("code", "ERROR")
+                lines.append(f"• {event.get('capability', 'desconocida')} — {state}")
+            self.chat.append("\n".join(lines))
 
         def toggle_voice(self):
             self.voice_enabled = not self.voice_enabled
@@ -433,6 +452,14 @@ def run_cinematic_panel():
             self.chat.append(
                 "\n[ACADEMIA] Método IGRIS: analizar, construir, probar, "
                 "reparar y entregar evidencia.")
+
+        def reset_view(self):
+            self.chat.clear()
+            self.attachments.clear()
+            self.plan_label.hide()
+            self.prompt.clear()
+            self.chat.append(
+                "[SISTEMA] Vista reiniciada. Memoria y auditoría conservadas.")
 
         def show_memory(self):
             rows = list(reversed(self.memory.recent("chat", limit=6)))

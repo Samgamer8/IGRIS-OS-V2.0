@@ -33,11 +33,11 @@ sin inventario, pruebas y autorización expresa.
 
 ## Prioridades siguientes
 
-1. Sustituir el proyecto Godot mínimo por plantillas jugables verificadas.
-2. Añadir edición multimedia mediante planes encadenados, previsualización y rollback.
-3. Mejorar generación multilenguaje con pruebas específicas de cada ecosistema.
-4. Incorporar búsqueda semántica local sobre archivos autorizados.
-5. Añadir cancelación, progreso y cola de misiones largas en el panel.
+1. Añadir edición multimedia mediante planes encadenados, previsualización y rollback.
+2. Mejorar generación multilenguaje con pruebas específicas de cada ecosistema.
+3. Incorporar búsqueda semántica local sobre archivos autorizados.
+4. Añadir cancelación, progreso y cola de misiones largas en el panel.
+5. Ampliar la plantilla Godot con géneros seleccionables y pruebas del motor.
 
 ## Prompt para continuar en otra sesión
 

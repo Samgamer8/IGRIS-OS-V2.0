@@ -19,9 +19,13 @@ versiones. El nucleo no depende de una interfaz grafica ni de un proveedor de IA
 - tools: descubrimiento de herramientas multimedia y videojuegos.
 - evolution: candidatos medidos, nunca auto-promocion de produccion.
 - ui: panel militar; muestra planes reales, no porcentajes ficticios.
+- voice: síntesis y dictado locales; prioriza Microsoft Pablo en español.
 
 ## Limites actuales
 
 La calidad depende del modelo instalado y de las herramientas externas disponibles.
 IGRIS verifica antes de entregar, pero no promete infalibilidad. Las capacidades de
 edicion multimedia y motores de juego se habilitan mediante adaptadores confinados.
+
+Los datos persistentes del panel se anclan a `runtime/` junto a la fuente canónica
+o al ejecutable portátil. Nunca dependen del directorio desde el que se invoque.

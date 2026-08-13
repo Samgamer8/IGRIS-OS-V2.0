@@ -34,3 +34,13 @@ def test_write_requires_confirmation(tmp_path):
     assert denied.code == "CONFIRMATION_REQUIRED"
     assert allowed.ok
 
+
+def test_audit_recent_skips_corrupt_lines(tmp_path):
+    audit = AuditLog(tmp_path / "audit.jsonl")
+    mission = Mission("prueba")
+    audit.record(mission, "health", ExecutionResult.success("ok"))
+    with audit.path.open("a", encoding="utf-8") as stream:
+        stream.write("linea dañada\n")
+    events = audit.recent()
+    assert len(events) == 1
+    assert events[0]["capability"] == "health"
