@@ -19,6 +19,14 @@ class MissionRouter:
               attachments: Sequence[str] = ()) -> RoutedAction:
         plan = MissionDirector().plan(Mission(objective))
         low = objective.casefold()
+        if any(phrase in low for phrase in (
+                "tus funciones", "tus capacidades", "quÃ© puedes hacer",
+                "que puedes hacer", "capacidades tienes")):
+            return RoutedAction("capability", "system.capabilities")
+        if any(phrase in low for phrase in (
+                "herramientas disponibles", "herramientas tienes",
+                "programas instalados")):
+            return RoutedAction("capability", "system.tools")
         source = str(Path(attachments[0]).resolve()) if attachments else ""
         if source and any(word in low for word in ("redimensiona", "resize", "escala")):
             width, height = _dimensions(low)

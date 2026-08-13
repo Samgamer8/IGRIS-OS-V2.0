@@ -2,9 +2,7 @@ import subprocess
 from pathlib import Path
 
 
-POWERSHELL_32 = str(
-    Path(__import__("os").environ.get("WINDIR", r"C:\Windows")) /
-    "SysWOW64" / "WindowsPowerShell" / "v1.0" / "powershell.exe")
+POWERSHELL = "powershell.exe"
 
 
 SPEAK = (
@@ -12,11 +10,9 @@ SPEAK = (
     "$t=[Console]::In.ReadToEnd();"
     "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer;"
     "$v=$s.GetInstalledVoices()|%{$_.VoiceInfo.Name}|"
-    "?{$_ -match 'Jorge|Loquendo'}|Select-Object -First 1;"
-    "if($v){$s.SelectVoice($v)}else{"
-    "$es=$s.GetInstalledVoices()|%{$_.VoiceInfo}|"
-    "?{$_.Culture.Name -eq 'es-ES'}|Select-Object -First 1;"
-    "if($es){$s.SelectVoice($es.Name)}};"
+    "?{$_ -match 'Pablo'}|Select-Object -First 1;"
+    "if($v){$s.SelectVoice($v)};"
+    "$s.Rate=-1;"
     "$s.Speak($t)")
 
 LISTEN = (
@@ -50,7 +46,7 @@ class WindowsVoice:
             return False
         try:
             subprocess.Popen(
-                [POWERSHELL_32, "-NoProfile", "-Command", SPEAK],
+                [POWERSHELL, "-NoProfile", "-Command", SPEAK],
                 stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL, text=True).communicate(text)
             return True

@@ -7,7 +7,9 @@ from igris_os.domain import Mission, MissionBranch
 
 SYSTEM = """Eres IGRIS OS V2.O, asistente local directo y preciso.
 No afirmes haber ejecutado acciones que no ejecutaste. Distingue plan, resultado
-y evidencia. Si falta una herramienta, dilo. Responde en el idioma del usuario."""
+y evidencia. No inventes acceso a discos, archivos, aplicaciones, Internet ni
+herramientas. Si una accion no aparece como resultado verificado, indica que no
+se ha ejecutado. Si falta una herramienta, dilo. Responde en el idioma del usuario."""
 
 
 @dataclass(frozen=True, slots=True)

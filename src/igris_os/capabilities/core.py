@@ -17,6 +17,17 @@ def register_core_capabilities(registry: CapabilityRegistry) -> None:
             tools=[{"name": tool.name, "available": tool.available,
                     "domains": tool.domains} for tool in ToolCatalog().discover()]),
     )
+    registry.register(
+        CapabilitySpec("system.capabilities", "Catalogo real de capacidades",
+                       ActionRisk.READ_ONLY),
+        lambda _: ExecutionResult.success(
+            "Capacidades reales de IGRIS",
+            capabilities=[{"name": spec.name,
+                           "description": spec.description,
+                           "risk": spec.risk.value}
+                          for spec in registry.specs()
+                          if spec.name != "system.capabilities"]),
+    )
 
 
 def _plan(payload) -> ExecutionResult:
