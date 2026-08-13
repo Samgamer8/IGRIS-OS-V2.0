@@ -2,6 +2,11 @@ import subprocess
 from pathlib import Path
 
 
+POWERSHELL_32 = str(
+    Path(__import__("os").environ.get("WINDIR", r"C:\Windows")) /
+    "SysWOW64" / "WindowsPowerShell" / "v1.0" / "powershell.exe")
+
+
 SPEAK = (
     "Add-Type -AssemblyName System.Speech;"
     "$t=[Console]::In.ReadToEnd();"
@@ -45,7 +50,7 @@ class WindowsVoice:
             return False
         try:
             subprocess.Popen(
-                ["powershell.exe", "-NoProfile", "-Command", SPEAK],
+                [POWERSHELL_32, "-NoProfile", "-Command", SPEAK],
                 stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL, text=True).communicate(text)
             return True

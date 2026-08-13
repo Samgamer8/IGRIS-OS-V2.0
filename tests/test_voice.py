@@ -1,5 +1,5 @@
 from igris_os.voice import WindowsVoice
-from igris_os.voice.windows import SPEAK
+from igris_os.voice.windows import POWERSHELL_32, SPEAK
 
 
 def test_empty_speech_is_rejected():
@@ -16,3 +16,4 @@ def test_voice_service_exposes_local_operations():
 def test_voice_prefers_jorge_when_installed():
     assert "Jorge|Loquendo" in SPEAK
     assert "es-ES" in SPEAK
+    assert "SysWOW64" in POWERSHELL_32
