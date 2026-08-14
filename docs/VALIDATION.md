@@ -4,7 +4,7 @@ Fecha: 2026-08-14.
 
 ## Puertas aprobadas
 
-- Suite unitaria, integración y seguridad: 97 pruebas aprobadas.
+- Suite unitaria, integración y seguridad: 106 pruebas aprobadas.
 - Arranque del panel PyQt6 en modo offscreen: aprobado.
 - Build PyInstaller para Windows: aprobado.
 - Arranque del ejecutable y captura visual: aprobado.
@@ -24,6 +24,8 @@ Fecha: 2026-08-14.
   verificación aprobada y original intacto.
 - Copia aislada real del repositorio: 101 archivos con hashes verificados.
 - Cola recuperable, memoria técnica y evolución en cuarentena: aprobadas.
+- Coordinación especializada, revisión cruzada, progreso, cancelación segura y
+  géneros Godot seleccionables: aprobados.
 
 ## Comandos reproducibles
 

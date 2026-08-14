@@ -17,6 +17,8 @@ class QueuedMission:
     attempts: int = 0
     created_at: str = ""
     message: str = ""
+    progress: int = 0
+    cancellation_requested: bool = False
 
 
 class MissionQueue:
@@ -29,6 +31,7 @@ class MissionQueue:
             if job.state == "running":
                 job.state = "pending"
                 job.message = "Recuperada tras reinicio"
+                job.progress = 0
                 recovered = True
         if recovered:
             self._save()
@@ -50,6 +53,7 @@ class MissionQueue:
             job = next((item for item in self._jobs if item.state == "pending"), None)
             if job:
                 job.state = "running"
+                job.progress = max(job.progress, 1)
                 job.attempts += 1
                 self._save()
             return job
@@ -61,7 +65,56 @@ class MissionQueue:
                 return
             job.state = "completed" if ok else "failed"
             job.message = message[:1000]
+            job.progress = 100
             self._save()
+
+    def update_progress(self, job_id: str, progress: int, message: str = "") -> None:
+        if not 0 <= progress <= 100:
+            raise ValueError("Progreso invalido")
+        with self._lock:
+            job = self._get(job_id)
+            if job.state != "running":
+                raise ValueError("La mision no esta en ejecucion")
+            job.progress = max(job.progress, progress)
+            if message:
+                job.message = message[:1000]
+            self._save()
+
+    def request_active_cancellation(self) -> bool:
+        with self._lock:
+            job = next((item for item in self._jobs if item.state == "running"), None)
+            if not job:
+                return False
+            job.cancellation_requested = True
+            job.message = "Cancelacion solicitada, esperando punto seguro"
+            self._save()
+            return True
+
+    def cancellation_requested(self, job_id: str) -> bool:
+        with self._lock:
+            return self._get(job_id).cancellation_requested
+
+    def cancel_at_safe_point(self, job_id: str) -> bool:
+        with self._lock:
+            job = self._get(job_id)
+            if job.state != "running" or not job.cancellation_requested:
+                return False
+            job.state = "cancelled"
+            job.progress = 100
+            job.message = "Cancelada en punto seguro"
+            self._save()
+            return True
+
+    def cancel_at_safe_point(self, job_id: str) -> bool:
+        with self._lock:
+            job = self._get(job_id)
+            if job.state != "running" or not job.cancellation_requested:
+                return False
+            job.state = "cancelled"
+            job.progress = 100
+            job.message = "Cancelada en punto seguro"
+            self._save()
+            return True
 
     def cancel_pending(self) -> int:
         count = 0
@@ -70,6 +123,7 @@ class MissionQueue:
                 if job.state == "pending":
                     job.state = "cancelled"
                     job.message = "Cancelada por el usuario"
+                    job.progress = 100
                     count += 1
             self._save()
         return count

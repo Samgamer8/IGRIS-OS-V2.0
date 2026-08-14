@@ -3,7 +3,7 @@ import mimetypes
 from pathlib import Path
 
 from igris_os.ai import OllamaClient
-from igris_os.application import CapabilityRegistry
+from igris_os.application import CapabilityRegistry, SpecialistCoordinator
 from igris_os.domain import ActionRisk, CapabilitySpec, ExecutionResult
 from igris_os.games import GodotProjectFactory
 from igris_os.files import RepositoryAnalyzer, RepositoryStager
@@ -49,6 +49,10 @@ def register_creation_capabilities(registry: CapabilityRegistry) -> None:
         CapabilitySpec("repository.develop",
                        "Propone cambios verificados sobre una copia aislada",
                        ActionRisk.WRITE_WORKSPACE, True), _repository_develop)
+    registry.register(
+        CapabilitySpec("mission.coordinate",
+                       "Coordina especialistas con revision cruzada",
+                       ActionRisk.WRITE_WORKSPACE, True), _coordinate)
     for name, description, handler in (
         ("image.resize", "Redimensiona una imagen", _resize_image),
         ("multimedia.extract_audio", "Extrae audio de un archivo", _extract_audio),
@@ -99,7 +103,7 @@ def _develop_multilang(payload):
 def _godot(payload):
     name = str(payload.get("name", "Juego IGRIS"))
     project = GodotProjectFactory(Path(payload["workspace"])).create(
-        name, confirmed=True)
+        name, genre=str(payload.get("genre", "top_down")), confirmed=True)
     return ExecutionResult.success("Proyecto Godot creado", project=str(project))
 
 
@@ -179,6 +183,24 @@ def _repository_develop(payload):
             "staged_root": result.staged_root, "report": result.report,
             "changed_files": result.changed_files,
             "original_modified": False})
+
+
+def _coordinate(payload):
+    model = str(payload.get("model", "qwen2.5-coder:7b"))
+    result = SpecialistCoordinator(
+        OllamaClient(timeout=float(payload.get("timeout", 240))),
+        Path(payload["workspace"]) / "evidence").coordinate(
+            str(payload.get("objective", "")), model)
+    if not result.complete:
+        return ExecutionResult.failure(
+            "La coordinacion no supero todos los especialistas",
+            "COORDINATION_INCOMPLETE")
+    return ExecutionResult.success(
+        "Coordinacion y revision cruzada completadas",
+        coordination={"branch": result.branch,
+                      "specialists": len(result.findings),
+                      "reviewed": result.review.ok,
+                      "evidence": result.evidence_path})
 
 
 def _media_result(result):

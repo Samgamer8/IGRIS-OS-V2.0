@@ -88,3 +88,17 @@ def test_repository_change_routes_to_isolated_developer(tmp_path):
         "implementa una función nueva en este proyecto", [str(tmp_path)])
     assert action.capability == "repository.develop"
     assert action.requires_confirmation
+
+
+def test_routes_specialist_coordination():
+    action = MissionRouter().route(
+        "coordina especialistas para diseñar una API")
+    assert action.capability == "mission.coordinate"
+    assert action.requires_confirmation
+
+
+def test_selects_platformer_genre():
+    action = MissionRouter().route(
+        "crea un videojuego de plataformas en Godot")
+    assert action.capability == "games.godot.scaffold"
+    assert action.payload["genre"] == "platformer"

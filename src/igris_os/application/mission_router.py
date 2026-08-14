@@ -20,7 +20,7 @@ class MissionRouter:
         plan = MissionDirector().plan(Mission(objective))
         low = objective.casefold()
         if any(phrase in low for phrase in (
-                "tus funciones", "tus capacidades", "qué puedes hacer",
+                "tus funciones", "tus capacidades", "qu\u00e9 puedes hacer",
                 "que puedes hacer", "capacidades tienes")):
             return RoutedAction("capability", "system.capabilities")
         if any(phrase in low for phrase in (
@@ -28,6 +28,12 @@ class MissionRouter:
                 "programas instalados")):
             return RoutedAction("capability", "system.tools")
         source = str(Path(attachments[0]).resolve()) if attachments else ""
+        if any(phrase in low for phrase in (
+                "coordina especialistas", "revisi\u00f3n cruzada",
+                "revision cruzada", "equipo de especialistas")):
+            return RoutedAction(
+                "capability", "mission.coordinate",
+                {"objective": objective}, True)
         if source and Path(source).is_dir() and any(word in low for word in (
                 "modifica", "arregla", "implementa", "corrige", "programa")):
             return RoutedAction(
@@ -39,7 +45,7 @@ class MissionRouter:
             return RoutedAction(
                 "capability", "repository.stage", {"root": source}, True)
         if source and Path(source).is_dir() and any(word in low for word in (
-                "repositorio", "proyecto", "código", "codigo", "carpeta")):
+                "repositorio", "proyecto", "c\u00f3digo", "codigo", "carpeta")):
             return RoutedAction(
                 "capability", "repository.analyze",
                 {"root": source, "query": objective}, True)
@@ -94,13 +100,14 @@ class MissionRouter:
                 word in low for word in ("crea", "construye", "genera")):
             return RoutedAction(
                 "capability", "games.godot.scaffold",
-                {"name": _project_name(objective)}, True)
+                {"name": _project_name(objective),
+                 "genre": _game_genre(low)}, True)
         return RoutedAction("chat")
 
 
 def _dimensions(text: str) -> tuple[int, int]:
     import re
-    match = re.search(r"(\d{2,5})\s*[x×]\s*(\d{2,5})", text)
+    match = re.search(r"(\d{2,5})\s*[x\u00d7]\s*(\d{2,5})", text)
     if not match:
         return 1280, 720
     return min(16384, int(match.group(1))), min(16384, int(match.group(2)))
@@ -112,3 +119,11 @@ def _project_name(objective: str) -> str:
                "videojuego", "en", "godot"}
     useful = [word for word in words if word.casefold() not in ignored]
     return " ".join(useful[:5]) or "Juego IGRIS"
+
+
+def _game_genre(text: str) -> str:
+    if any(word in text for word in ("plataformas", "platformer")):
+        return "platformer"
+    if any(word in text for word in ("arcade", "maquinas recreativas")):
+        return "arcade"
+    return "top_down"

@@ -30,12 +30,14 @@ sin inventario, pruebas y autorización expresa.
 - Mapa profundo de repositorios con búsqueda contextual y límites de lectura.
 - Copia y edición aisladas de repositorios con diff, verificación y rollback.
 - Cola persistente recuperable y memoria técnica de entregas verificadas.
+- Progreso monotónico y cancelación cooperativa en puntos seguros.
+- Coordinación de especialistas con revisión cruzada y evidencia persistente.
 - Evolución con puertas de tests, seguridad y mejora; solo pasa a revisión.
-- Godot: plantilla 2D jugable, confinada y con evidencia de verificación.
+- Godot: plantillas top-down, arcade y plataformas, confinadas y verificadas.
 
 ## Última entrega verificada
 
-- Pruebas: 97 aprobadas.
+- Pruebas: 106 aprobadas.
 - Release check: aprobado.
 - Portable probado desde un directorio externo: aprobado.
 - SHA-256: `C1BF9FA6346013A182348C2DE85E3C6DC8313947260ACD9AFCF2E6F067D89884`.
@@ -46,10 +48,9 @@ sin inventario, pruebas y autorización expresa.
 ## Prioridades siguientes
 
 1. Instalar o aislar toolchains para ejecutar pruebas multilenguaje sin riesgo.
-2. Añadir cancelación cooperativa y progreso granular a misiones largas.
-3. Ampliar la plantilla Godot con géneros seleccionables y pruebas del motor.
+2. Conectar indicadores de progreso granular a todas las operaciones largas.
+3. Ejecutar pruebas reales del motor Godot cuando esté instalado.
 4. Evolucionar búsqueda contextual hacia recuperación semántica local.
-5. Incorporar coordinación de especialistas con evaluación cruzada verificable.
 
 ## Prompt para continuar en otra sesión
 

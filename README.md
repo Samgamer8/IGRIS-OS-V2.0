@@ -31,6 +31,9 @@ Primera base ejecutable:
 - mapa profundo de repositorios con lenguajes, símbolos, dependencias y pruebas;
 - copias aisladas de repositorios y propuestas verificadas con diff y rollback;
 - cola persistente de misiones y memoria técnica verificada;
+- progreso monotónico y cancelación cooperativa en puntos seguros;
+- coordinación de especialistas con revisión cruzada documentada;
+- proyectos Godot top-down, arcade y plataformas;
 - evolución medida en cuarentena, sin autopromoción a producción;
 - plantilla Godot 2D jugable con verificación;
 - esquema de continuidad en `docs/SESSION_CONTINUITY.md`.

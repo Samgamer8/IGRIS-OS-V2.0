@@ -1,4 +1,5 @@
 import shutil
+import json
 
 import pytest
 
@@ -16,6 +17,23 @@ def test_godot_project_requires_confirmation(tmp_path):
     script = (project / "main.gd").read_text(encoding="utf-8")
     assert "Input.get_vector" in script
     assert (project / "VERIFICATION.json").is_file()
+
+
+@pytest.mark.parametrize("genre", ["top_down", "arcade", "platformer"])
+def test_godot_supported_genres_are_recorded(tmp_path, genre):
+    root = GodotProjectFactory(tmp_path).create(
+        "Juego " + genre, genre=genre, confirmed=True)
+    script = (root / "main.gd").read_text(encoding="utf-8")
+    report = json.loads(
+        (root / "VERIFICATION.json").read_text(encoding="utf-8"))
+    assert f'var genre := "{genre}"' in script
+    assert report["genre"] == genre
+
+
+def test_godot_rejects_unknown_genre(tmp_path):
+    with pytest.raises(ValueError):
+        GodotProjectFactory(tmp_path).create(
+            "Juego", genre="desconocido", confirmed=True)
 
 
 def test_javascript_syntax_when_node_available(tmp_path):

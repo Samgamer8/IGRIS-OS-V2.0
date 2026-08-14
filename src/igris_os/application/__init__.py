@@ -7,5 +7,7 @@ __all__ = ["AssistantReply", "AssistantService", "MissionDirector",
 from .assistant import AssistantReply, AssistantService
 from .mission_router import MissionRouter, RoutedAction
 from .mission_queue import MissionQueue, QueuedMission
+from .coordinator import CoordinationResult, SpecialistCoordinator, SpecialistFinding
 
-__all__ += ["MissionQueue", "QueuedMission"]
+__all__ += ["MissionQueue", "QueuedMission", "CoordinationResult",
+            "SpecialistCoordinator", "SpecialistFinding"]

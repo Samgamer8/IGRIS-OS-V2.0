@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from igris_os.application import MissionQueue
 
 
@@ -43,3 +45,22 @@ def test_corrupt_queue_recovers_empty(tmp_path):
     path = tmp_path / "queue.json"
     path.write_text("not json", encoding="utf-8")
     assert MissionQueue(path).summary()["pending"] == 0
+
+
+def test_progress_is_monotonic_and_cancellation_is_persisted(tmp_path):
+    path = tmp_path / "queue.json"
+    queue = MissionQueue(path)
+    job = queue.enqueue("larga", "chat")
+    queue.next()
+    queue.update_progress(job.id, 25, "analizando")
+    queue.update_progress(job.id, 20)
+    assert queue.request_active_cancellation()
+    assert queue.cancellation_requested(job.id)
+    assert queue.cancel_at_safe_point(job.id)
+    assert queue.summary()["cancelled"] == 1
+    document = json.loads(path.read_text(encoding="utf-8"))
+    assert document[0]["progress"] == 100
+    assert document[0]["state"] == "cancelled"
+    assert document[0]["cancellation_requested"] is True
+    with pytest.raises(ValueError):
+        queue.update_progress(job.id, 101)
