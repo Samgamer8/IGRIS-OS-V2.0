@@ -66,6 +66,39 @@ TRAINING_SESSION_1 = (
     "IGRIS está listo para recibir una nueva orden.",
 )
 
+TRAINING_SESSION_2 = (
+    "¿Cuál es el objetivo principal de esta misión?",
+    "¿Deseas conservar una copia del resultado anterior?",
+    "Confirma si puedo continuar con la operación solicitada.",
+    "Atención: esta acción modificará archivos dentro del proyecto.",
+    "El acceso fue autorizado por el usuario responsable.",
+    "Iniciando el diagnóstico completo del sistema.",
+    "Procesador al treinta y dos por ciento; memoria al sesenta y uno.",
+    "Quedan doce tareas pendientes y cuatro ya han terminado.",
+    "La dirección local es ciento veintisiete punto cero punto cero punto uno.",
+    "El servicio responderá por el puerto once mil cuatrocientos treinta y cuatro.",
+    "La versión dos punto cero permanece estable.",
+    "El archivo principal se llama configuración punto json.",
+    "Abriendo la carpeta de recursos y modelos locales.",
+    "La función recibe texto, idioma, velocidad y nivel de seguridad.",
+    "El resultado debe ser claro, reproducible y fácil de mantener.",
+    "Voy a comparar la propuesta con la versión de referencia.",
+    "La evaluación independiente detectó una diferencia importante.",
+    "El candidato no será promovido automáticamente a producción.",
+    "Primero comprobaré calidad, rendimiento, seguridad y compatibilidad.",
+    "La respuesta contiene una advertencia y dos recomendaciones.",
+    "He preparado una imagen de mil veinticuatro por mil veinticuatro píxeles.",
+    "El vídeo se exportará con sonido estéreo y veinticuatro fotogramas.",
+    "La frecuencia de audio es de cuarenta y ocho mil hercios.",
+    "Reduciré el ruido sin eliminar los detalles importantes de la voz.",
+    "El personaje puede caminar, correr, saltar y recoger objetos.",
+    "La escena incluye iluminación, colisiones y una cámara dinámica.",
+    "Los controles responden al teclado, al ratón y al mando.",
+    "Guardaré el progreso antes de cerrar la aplicación.",
+    "Todo está preparado. Puedes revisar el resultado cuando quieras.",
+    "Misión completada. Permaneceré a la espera.",
+)
+
 
 class VoiceDatasetRecorder:
     def __init__(self, root: Path, device: str,

@@ -2,7 +2,8 @@ import argparse
 from pathlib import Path
 
 from igris_os.voice.dataset import (
-    PILOT_SCRIPT, TRAINING_SESSION_1, VoiceDatasetRecorder,
+    PILOT_SCRIPT, TRAINING_SESSION_1, TRAINING_SESSION_2,
+    VoiceDatasetRecorder,
 )
 
 
@@ -11,13 +12,19 @@ def main() -> int:
     parser.add_argument("--device", default="Micrófono (Realtek(R) Audio)")
     parser.add_argument("--output", default="runtime/voice_dataset/pilot")
     parser.add_argument("--consent", action="store_true")
-    parser.add_argument("--mode", choices=("pilot", "training1"), default="pilot")
+    parser.add_argument(
+        "--mode", choices=("pilot", "training1", "training2"), default="pilot")
     args = parser.parse_args()
     if not args.consent:
         parser.error("Debes confirmar --consent para grabar tu propia voz")
     recorder = VoiceDatasetRecorder(Path(args.output), args.device)
     samples = []
-    script = TRAINING_SESSION_1 if args.mode == "training1" else PILOT_SCRIPT
+    scripts = {
+        "pilot": PILOT_SCRIPT,
+        "training1": TRAINING_SESSION_1,
+        "training2": TRAINING_SESSION_2,
+    }
+    script = scripts[args.mode]
     print("Lee cada frase con tono natural, firme y constante.")
     for index, phrase in enumerate(script, 1):
         print(f"\n[{index}/{len(script)}] {phrase}")
