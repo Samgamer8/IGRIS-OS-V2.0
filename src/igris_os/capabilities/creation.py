@@ -6,6 +6,7 @@ from igris_os.ai import OllamaClient
 from igris_os.application import CapabilityRegistry
 from igris_os.domain import ActionRisk, CapabilitySpec, ExecutionResult
 from igris_os.games import GodotProjectFactory
+from igris_os.files import RepositoryAnalyzer
 from igris_os.multimedia import ImageEngine, MediaEngine, MediaPipeline
 from igris_os.programming import (
     LanguageVerifier, MultiLanguageDeveloper, PythonProjectDeveloper,
@@ -35,6 +36,10 @@ def register_creation_capabilities(registry: CapabilityRegistry) -> None:
     registry.register(
         CapabilitySpec("files.inspect", "Inspecciona archivos adjuntos",
                        ActionRisk.READ_ONLY), _inspect_files)
+    registry.register(
+        CapabilitySpec("repository.analyze",
+                       "Mapea símbolos, dependencias y pruebas de un repositorio",
+                       ActionRisk.WRITE_WORKSPACE, True), _repository_analyze)
     for name, description, handler in (
         ("image.resize", "Redimensiona una imagen", _resize_image),
         ("multimedia.extract_audio", "Extrae audio de un archivo", _extract_audio),
@@ -119,6 +124,21 @@ def _inspect_files(payload):
         return ExecutionResult.failure("No hay archivos validos", "NO_FILES")
     return ExecutionResult.success(
         f"{len(inspected)} archivo(s) inspeccionado(s)", files=inspected)
+
+
+def _repository_analyze(payload):
+    try:
+        report = RepositoryAnalyzer(Path(payload["workspace"])).analyze(
+            Path(payload["root"]), str(payload.get("query", "")))
+    except ValueError as exc:
+        return ExecutionResult.failure(str(exc), "REPOSITORY_INVALID")
+    return ExecutionResult.success(
+        "Repositorio analizado y mapeado", repository={
+            "files": report.files, "bytes_read": report.bytes_read,
+            "languages": report.languages, "symbols": len(report.symbols),
+            "imports": len(report.imports), "tests": len(report.tests),
+            "matches": report.matches, "manifest": report.manifest,
+            "truncated": report.truncated})
 
 
 def _media_result(result):

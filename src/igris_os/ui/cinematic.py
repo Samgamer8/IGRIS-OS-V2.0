@@ -41,6 +41,20 @@ def format_result(data):
         return "\n[ARCHIVOS ANALIZADOS]\n" + "\n".join(
             f"• {item.get('name', 'archivo')} — {item.get('size', 0)} bytes"
             for item in data["files"])
+    if data.get("repository"):
+        repo = data["repository"]
+        languages = ", ".join(
+            f"{name}: {count}" for name, count in repo.get("languages", {}).items())
+        matches = "\n".join(
+            "• " + str(item.get("path", ""))
+            for item in repo.get("matches", ())[:8])
+        return ("\n[MAPA DEL REPOSITORIO]"
+                f"\nArchivos: {repo.get('files', 0)} · "
+                f"Símbolos: {repo.get('symbols', 0)} · "
+                f"Pruebas: {repo.get('tests', 0)}"
+                "\nLenguajes: " + languages +
+                ("\n[ARCHIVOS RELEVANTES]\n" + matches if matches else "") +
+                "\n[MANIFIESTO] " + str(repo.get("manifest", "")))
     if data.get("project"):
         return "\n[PROYECTO ENTREGADO] " + str(data["project"])
     if data.get("output"):

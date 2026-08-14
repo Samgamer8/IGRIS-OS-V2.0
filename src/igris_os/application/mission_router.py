@@ -28,6 +28,11 @@ class MissionRouter:
                 "programas instalados")):
             return RoutedAction("capability", "system.tools")
         source = str(Path(attachments[0]).resolve()) if attachments else ""
+        if source and Path(source).is_dir() and any(word in low for word in (
+                "repositorio", "proyecto", "código", "codigo", "carpeta")):
+            return RoutedAction(
+                "capability", "repository.analyze",
+                {"root": source, "query": objective}, True)
         if source and any(word in low for word in ("redimensiona", "resize", "escala")):
             width, height = _dimensions(low)
             return RoutedAction(

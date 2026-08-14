@@ -35,3 +35,13 @@ def test_pipeline_rollback_is_explained():
     rendered = format_result({"rolled_back": True, "report": "evidence.json"})
     assert "ROLLBACK APLICADO" in rendered
     assert "evidence.json" in rendered
+
+
+def test_repository_map_is_human_readable():
+    rendered = format_result({"repository": {
+        "files": 12, "symbols": 30, "tests": 4,
+        "languages": {"python": 10, "javascript": 2},
+        "matches": [{"path": "src/app.py"}], "manifest": "map.json"}})
+    assert "MAPA DEL REPOSITORIO" in rendered
+    assert "src/app.py" in rendered
+    assert "map.json" in rendered

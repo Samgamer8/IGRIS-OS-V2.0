@@ -68,3 +68,10 @@ def test_video_edit_routes_to_verified_pipeline():
     assert [step["kind"] for step in action.payload["operations"]] == [
         "thumbnail", "transcode"]
     assert action.requires_confirmation
+
+
+def test_repository_folder_routes_to_deep_analysis(tmp_path):
+    action = MissionRouter().route(
+        "analiza este repositorio y su código", [str(tmp_path)])
+    assert action.capability == "repository.analyze"
+    assert action.requires_confirmation

@@ -27,11 +27,12 @@ sin inventario, pruebas y autorización expresa.
   C++ y Java con verificación de herramientas locales.
 - Adjuntos: análisis, imagen, extracción de audio, miniatura y transcodificación.
 - Pipeline multimedia encadenado con previsualización, evidencia y rollback.
+- Mapa profundo de repositorios con búsqueda contextual y límites de lectura.
 - Godot: plantilla 2D jugable, confinada y con evidencia de verificación.
 
 ## Última entrega verificada
 
-- Pruebas: 77 aprobadas.
+- Pruebas: 81 aprobadas.
 - Release check: aprobado.
 - Portable probado desde un directorio externo: aprobado.
 - SHA-256: `C1BF9FA6346013A182348C2DE85E3C6DC8313947260ACD9AFCF2E6F067D89884`.
@@ -42,10 +43,10 @@ sin inventario, pruebas y autorización expresa.
 ## Prioridades siguientes
 
 1. Mejorar generación multilenguaje con pruebas específicas de cada ecosistema.
-2. Incorporar búsqueda semántica local sobre archivos autorizados.
+2. Añadir edición segura de repositorios existentes sobre copia aislada.
 3. Añadir cancelación, progreso y cola de misiones largas en el panel.
 4. Ampliar la plantilla Godot con géneros seleccionables y pruebas del motor.
-5. Añadir más operaciones multimedia declarativas sin permitir comandos libres.
+5. Evolucionar búsqueda contextual hacia recuperación semántica local.
 
 ## Prompt para continuar en otra sesión
 

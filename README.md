@@ -28,6 +28,7 @@ Primera base ejecutable:
 - memoria persistente y auditoría consultable de misiones;
 - adjuntos conectados a análisis, imagen, vídeo y audio;
 - pipeline multimedia con previsualización, evidencia y rollback confinado;
+- mapa profundo de repositorios con lenguajes, símbolos, dependencias y pruebas;
 - plantilla Godot 2D jugable con verificación;
 - esquema de continuidad en `docs/SESSION_CONTINUITY.md`.
 
