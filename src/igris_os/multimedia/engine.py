@@ -67,6 +67,20 @@ class MediaEngine:
                           "-i", str(source.resolve()), "-frames:v", "1",
                           str(target)], target)
 
+    def trim(self, source: Path, output: str, start: float, duration: float,
+             *, confirmed: bool = False) -> MediaResult:
+        if not confirmed:
+            return MediaResult(False, "Se necesita confirmacion")
+        if start < 0 or duration <= 0 or duration > 86_400:
+            return MediaResult(False, "Intervalo multimedia invalido")
+        if not self.ffmpeg or not source.is_file():
+            return MediaResult(False, "FFmpeg o archivo no disponible")
+        target = safe_output(self.workspace, output)
+        return self._run([
+            self.ffmpeg, "-y", "-ss", str(start), "-i", str(source.resolve()),
+            "-t", str(duration), "-c:v", "libx264", "-c:a", "aac",
+            str(target)], target)
+
     def _run(self, command: list[str], target: Path) -> MediaResult:
         try:
             run = subprocess.run(command, capture_output=True, text=True,

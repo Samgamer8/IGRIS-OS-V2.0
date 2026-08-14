@@ -6,7 +6,7 @@ from igris_os.ai import OllamaClient
 from igris_os.application import CapabilityRegistry
 from igris_os.domain import ActionRisk, CapabilitySpec, ExecutionResult
 from igris_os.games import GodotProjectFactory
-from igris_os.multimedia import ImageEngine, MediaEngine
+from igris_os.multimedia import ImageEngine, MediaEngine, MediaPipeline
 from igris_os.programming import (
     LanguageVerifier, MultiLanguageDeveloper, PythonProjectDeveloper,
 )
@@ -40,6 +40,8 @@ def register_creation_capabilities(registry: CapabilityRegistry) -> None:
         ("multimedia.extract_audio", "Extrae audio de un archivo", _extract_audio),
         ("multimedia.thumbnail", "Extrae una miniatura de video", _thumbnail),
         ("multimedia.transcode", "Convierte video a MP4", _transcode),
+        ("multimedia.pipeline", "Ejecuta un plan multimedia con rollback",
+         _media_pipeline),
     ):
         registry.register(CapabilitySpec(
             name, description, ActionRisk.WRITE_WORKSPACE, True), handler)
@@ -152,3 +154,19 @@ def _transcode(payload):
         Path(payload["source"]), str(payload.get("output", "video.mp4")),
         confirmed=True)
     return _media_result(result)
+
+
+def _media_pipeline(payload):
+    operations = payload.get("operations", [])
+    if not isinstance(operations, list):
+        return ExecutionResult.failure("Plan multimedia invalido", "MEDIA_FAILED")
+    result = MediaPipeline(Path(payload["workspace"])).execute(
+        Path(payload["source"]), operations, confirmed=True)
+    if not result.ok:
+        return ExecutionResult(
+            False,
+            result.message + ("; rollback aplicado" if result.rolled_back else ""),
+            "MEDIA_PIPELINE_FAILED",
+            {"report": result.report, "rolled_back": result.rolled_back})
+    return ExecutionResult.success(
+        result.message, outputs=result.outputs, report=result.report)

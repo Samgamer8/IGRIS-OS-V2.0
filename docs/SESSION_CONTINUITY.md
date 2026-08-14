@@ -26,11 +26,12 @@ sin inventario, pruebas y autorización expresa.
 - Programación Python con pruebas y reparación; JavaScript, TypeScript, Rust,
   C++ y Java con verificación de herramientas locales.
 - Adjuntos: análisis, imagen, extracción de audio, miniatura y transcodificación.
+- Pipeline multimedia encadenado con previsualización, evidencia y rollback.
 - Godot: plantilla 2D jugable, confinada y con evidencia de verificación.
 
 ## Última entrega verificada
 
-- Pruebas: 69 aprobadas.
+- Pruebas: 77 aprobadas.
 - Release check: aprobado.
 - Portable probado desde un directorio externo: aprobado.
 - SHA-256: `F6262CE6F57FA9D0B01E70E7872DA82775DC470EC7D207A0980DE5A701D44A13`.
@@ -40,11 +41,11 @@ sin inventario, pruebas y autorización expresa.
 
 ## Prioridades siguientes
 
-1. Añadir edición multimedia mediante planes encadenados, previsualización y rollback.
-2. Mejorar generación multilenguaje con pruebas específicas de cada ecosistema.
-3. Incorporar búsqueda semántica local sobre archivos autorizados.
-4. Añadir cancelación, progreso y cola de misiones largas en el panel.
-5. Ampliar la plantilla Godot con géneros seleccionables y pruebas del motor.
+1. Mejorar generación multilenguaje con pruebas específicas de cada ecosistema.
+2. Incorporar búsqueda semántica local sobre archivos autorizados.
+3. Añadir cancelación, progreso y cola de misiones largas en el panel.
+4. Ampliar la plantilla Godot con géneros seleccionables y pruebas del motor.
+5. Añadir más operaciones multimedia declarativas sin permitir comandos libres.
 
 ## Prompt para continuar en otra sesión
 

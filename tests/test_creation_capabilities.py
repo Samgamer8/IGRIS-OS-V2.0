@@ -60,3 +60,16 @@ def test_inspect_files_caps_file_count(tmp_path):
         Mission("analiza"), "files.inspect", {"sources": sources})
     assert result.ok
     assert len(result.data["files"]) == 50
+
+
+def test_invalid_pipeline_returns_controlled_evidence(tmp_path):
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"video")
+    result = build_igris(tmp_path / "runtime").execute(
+        Mission("edita"), "multimedia.pipeline",
+        {"source": str(source), "operations": [
+            {"kind": "no_permitida", "output": "x.bin"}]},
+        confirmed=True)
+    assert not result.ok
+    assert result.code == "MEDIA_PIPELINE_FAILED"
+    assert "report" in result.data

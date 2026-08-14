@@ -60,3 +60,11 @@ def test_unicode_dimensions_are_recognized():
         "redimensiona a 640×480", ["foto.png"])
     assert action.payload["width"] == 640
     assert action.payload["height"] == 480
+
+
+def test_video_edit_routes_to_verified_pipeline():
+    action = MissionRouter().route("edita este video", ["demo.mp4"])
+    assert action.capability == "multimedia.pipeline"
+    assert [step["kind"] for step in action.payload["operations"]] == [
+        "thumbnail", "transcode"]
+    assert action.requires_confirmation

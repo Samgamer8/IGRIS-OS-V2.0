@@ -27,6 +27,7 @@ Primera base ejecutable:
 - voz masculina española Microsoft Pablo y dictado local de Windows;
 - memoria persistente y auditoría consultable de misiones;
 - adjuntos conectados a análisis, imagen, vídeo y audio;
+- pipeline multimedia con previsualización, evidencia y rollback confinado;
 - plantilla Godot 2D jugable con verificación;
 - esquema de continuidad en `docs/SESSION_CONTINUITY.md`.
 

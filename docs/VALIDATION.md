@@ -4,7 +4,7 @@ Fecha: 2026-08-14.
 
 ## Puertas aprobadas
 
-- Suite unitaria, integración y seguridad: 69 pruebas aprobadas.
+- Suite unitaria, integración y seguridad: 77 pruebas aprobadas.
 - Arranque del panel PyQt6 en modo offscreen: aprobado.
 - Build PyInstaller para Windows: aprobado.
 - Arranque del ejecutable y captura visual: aprobado.
@@ -16,6 +16,8 @@ Fecha: 2026-08-14.
 - Voz Microsoft Pablo mediante SAPI de escritorio: aprobada.
 - Persistencia portable anclada al ejecutable: aprobada.
 - Plantilla Godot 2D jugable y evidencia `VERIFICATION.json`: aprobada.
+- Pipeline FFmpeg real con miniatura, transcodificación, evidencia y rollback:
+  aprobado.
 
 ## Comandos reproducibles
 

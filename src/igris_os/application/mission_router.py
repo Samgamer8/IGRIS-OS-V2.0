@@ -46,6 +46,15 @@ class MissionRouter:
             return RoutedAction(
                 "capability", "multimedia.transcode",
                 {"source": source, "output": "video_convertido.mp4"}, True)
+        if source and any(phrase in low for phrase in (
+                "edita este video", "procesa este video", "prepara este video",
+                "edita el video", "procesa el video")):
+            return RoutedAction(
+                "capability", "multimedia.pipeline",
+                {"source": source, "operations": [
+                    {"kind": "thumbnail", "output": "preview.png", "second": 0},
+                    {"kind": "transcode", "output": "video_final.mp4"},
+                ]}, True)
         if attachments and any(word in low for word in (
                 "analiza", "revisa", "inspecciona", "resume", "archivos")):
             return RoutedAction(

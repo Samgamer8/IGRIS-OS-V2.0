@@ -45,6 +45,14 @@ def format_result(data):
         return "\n[PROYECTO ENTREGADO] " + str(data["project"])
     if data.get("output"):
         return "\n[ARCHIVO GENERADO] " + str(data["output"])
+    if data.get("outputs"):
+        lines = "\n".join("• " + str(item) for item in data["outputs"])
+        report = str(data.get("report", ""))
+        return "\n[PLAN MULTIMEDIA COMPLETADO]\n" + lines + (
+            "\n[EVIDENCIA] " + report if report else "")
+    if data.get("rolled_back"):
+        return ("\n[ROLLBACK APLICADO] No se conservó ninguna salida parcial."
+                "\n[EVIDENCIA] " + str(data.get("report", "")))
     if "cpu_percent" in data:
         return ("\n[ESTADO REAL] CPU: " + str(data.get("cpu_percent")) +
                 "% · Memoria: " + str(data.get("memory_percent")) + "%")
