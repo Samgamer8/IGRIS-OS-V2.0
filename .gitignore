@@ -1,6 +1,7 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.voice_env/
 .coverage
 build/
 dist/
