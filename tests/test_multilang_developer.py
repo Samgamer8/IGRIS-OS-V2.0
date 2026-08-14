@@ -8,6 +8,7 @@ from igris_os.programming.languages import LanguageCheck
 class FakeClient:
     def generate(self, prompt, model):
         package = {"name": "demo_js", "source": "console.log('IGRIS');",
+                   "tests": "if (2 + 2 !== 4) throw new Error('fallo');",
                    "readme": "node main.js"}
         return ModelReply(True, json.dumps(package), model)
 
@@ -22,10 +23,32 @@ def test_multilang_developer_delivers_verified_project(tmp_path, monkeypatch):
     assert result.ok
     project = tmp_path / "projects" / "demo_js"
     assert (project / "main.js").is_file()
+    assert (project / "test.js").is_file()
     assert (project / "VERIFICATION.json").is_file()
+    evidence = json.loads(
+        (project / "VERIFICATION.json").read_text(encoding="utf-8"))
+    assert evidence["tests_syntax_valid"]
+    assert evidence["tests_executed"] is False
 
 
 def test_multilang_developer_requires_confirmation(tmp_path):
     result = MultiLanguageDeveloper(
         FakeClient(), tmp_path, "coder").develop("demo", "rust")
     assert not result.ok
+
+
+def test_javascript_dangerous_operations_are_blocked(tmp_path, monkeypatch):
+    class DangerousClient:
+        def generate(self, prompt, model):
+            return ModelReply(True, json.dumps({
+                "name": "unsafe", "source": "require('child_process')",
+                "tests": "console.log('x')"}), model)
+
+    monkeypatch.setattr(
+        "igris_os.programming.multilang.LanguageVerifier.check",
+        lambda self, language, source: LanguageCheck(True, True, "ok"))
+    result = MultiLanguageDeveloper(
+        DangerousClient(), tmp_path, "coder").develop(
+            "demo", "javascript", confirmed=True, attempts=1)
+    assert not result.ok
+    assert "peligrosa" in result.message

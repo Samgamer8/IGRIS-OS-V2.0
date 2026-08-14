@@ -48,3 +48,11 @@ class MemoryStore:
         if limit < 1 or limit > 500:
             raise ValueError("Limite invalido")
         return self.recall(category, verified_only=verified_only)[:limit]
+
+    def count(self, category: str, *, verified_only: bool = True) -> int:
+        query = "SELECT COUNT(*) FROM memories WHERE category=?"
+        args = [category]
+        if verified_only:
+            query += " AND verified=1"
+        with self._connect() as db:
+            return int(db.execute(query, args).fetchone()[0])

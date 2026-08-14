@@ -24,3 +24,5 @@ def test_recent_memory_is_limited_and_verified(tmp_path):
     rows = store.recent("chat", limit=1)
     assert len(rows) == 1
     assert rows[0]["content"]["text"] == "dos"
+    assert store.count("chat") == 2
+    assert store.count("chat", verified_only=False) == 3

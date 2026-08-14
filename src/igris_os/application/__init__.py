@@ -6,3 +6,6 @@ __all__ = ["AssistantReply", "AssistantService", "MissionDirector",
            "MissionRouter", "RoutedAction", "IgrisKernel", "CapabilityRegistry"]
 from .assistant import AssistantReply, AssistantService
 from .mission_router import MissionRouter, RoutedAction
+from .mission_queue import MissionQueue, QueuedMission
+
+__all__ += ["MissionQueue", "QueuedMission"]

@@ -4,7 +4,9 @@ import queue
 import sys
 import threading
 
-from igris_os.application import AssistantService, MissionDirector, MissionRouter
+from igris_os.application import (
+    AssistantService, MissionDirector, MissionQueue, MissionRouter,
+)
 from igris_os.bootstrap import build_igris
 from igris_os.domain import Mission
 from igris_os.memory import MemoryStore
@@ -185,6 +187,8 @@ def run_cinematic_panel():
             self.runtime = runtime_root()
             self.kernel = build_igris(self.runtime)
             self.memory = MemoryStore(self.runtime / "memory" / "chat.db")
+            self.mission_queue = MissionQueue(self.runtime / "missions_queue.json")
+            self.active_job = None
             self.voice_engine = WindowsVoice()
             self.voice_enabled = True
             self.voice_inputs = queue.Queue()
@@ -204,6 +208,7 @@ def run_cinematic_panel():
             self.metrics_timer = QTimer(self)
             self.metrics_timer.timeout.connect(self.update_metrics)
             self.metrics_timer.start(1500)
+            QTimer.singleShot(0, self.dispatch_next)
 
         def build_visuals(self, QFrame, QLabel, QPushButton, QTextEdit,
                           PromptEdit, Dial, QFont, QPixmap, Qt):
@@ -366,7 +371,6 @@ def run_cinematic_panel():
             self.status.setText("● Estado: Procesando")
             self.status.setStyleSheet("color:#ffbe55;background:transparent;")
             self.galaxy.set_busy(True)
-            self.prompt.setEnabled(False)
             action = self.router.route(objective, self.attachments)
             if action.kind == "capability":
                 answer = QMessageBox.StandardButton.Yes
@@ -377,19 +381,34 @@ def run_cinematic_panel():
                 if answer != QMessageBox.StandardButton.Yes:
                     self.finish_message("Operación cancelada.", False)
                     return
-                threading.Thread(
-                    target=self.run_capability,
-                    args=(objective, action.capability, action.payload),
-                    daemon=True).start()
+                job = self.mission_queue.enqueue(
+                    objective, "capability", action.capability, action.payload)
             else:
-                threading.Thread(
-                    target=lambda: self.replies.put(self.assistant.respond(
-                        objective, self.memory_context())),
-                    daemon=True).start()
+                job = self.mission_queue.enqueue(objective, "chat")
+            pending = self.mission_queue.summary()["pending"]
+            self.chat.append(f"[COLA] Misión {job.id[:8]} registrada · pendientes: {pending}")
+            self.dispatch_next()
 
-        def run_capability(self, objective, capability, payload):
-            self.replies.put(self.kernel.execute(
-                Mission(objective), capability, payload, confirmed=True))
+        def dispatch_next(self):
+            if self.active_job is not None:
+                return
+            job = self.mission_queue.next()
+            if job is None:
+                return
+            self.active_job = job
+            self.status.setText("● Estado: Ejecutando " + job.id[:8])
+            self.galaxy.set_busy(True)
+            threading.Thread(target=self.run_job, args=(job,), daemon=True).start()
+
+        def run_job(self, job):
+            if job.kind == "capability":
+                reply = self.kernel.execute(
+                    Mission(job.objective), job.capability, job.payload,
+                    confirmed=True)
+            else:
+                reply = self.assistant.respond(
+                    job.objective, self.memory_context())
+            self.replies.put((job.id, reply))
 
         def tick(self):
             try:
@@ -404,10 +423,12 @@ def run_cinematic_panel():
                 else:
                     self.chat.append("\n[VOZ] No se detectó una orden.")
             try:
-                reply = self.replies.get_nowait()
+                job_id, reply = self.replies.get_nowait()
             except queue.Empty:
+                self.dispatch_next()
                 return
             text = getattr(reply, "text", getattr(reply, "message", str(reply)))
+            ok = bool(getattr(reply, "ok", False))
             model = getattr(reply, "model", "")
             self.chat.append(f"\n[IGRIS{(' · ' + model) if model else ''}] {text}")
             data = getattr(reply, "data", {})
@@ -418,14 +439,46 @@ def run_cinematic_panel():
             self.memory.remember(
                 "chat", {"role": "igris", "text": text,
                          "ok": bool(getattr(reply, "ok", False))}, verified=True)
+            if data and self.active_job is not None:
+                technical = self.technical_summary(
+                    self.active_job.objective, self.active_job.capability,
+                    dict(data))
+                if technical:
+                    self.memory.remember(
+                        "technical", technical, verified=ok)
             if data:
                 rendered = self.render_result(dict(data))
                 if rendered:
                     self.chat.append(rendered)
-            self.finish_message("", bool(getattr(reply, "ok", False)))
+            self.mission_queue.finish(job_id, ok, text)
+            self.active_job = None
+            self.finish_message("", ok)
+            self.dispatch_next()
 
         def render_result(self, data):
             return format_result(data)
+
+        @staticmethod
+        def technical_summary(objective, capability, data):
+            summary = {"objective": objective[:500],
+                       "capability": capability or "chat"}
+            if data.get("repository"):
+                repo = data["repository"]
+                summary.update(kind="repository", files=repo.get("files", 0),
+                               symbols=repo.get("symbols", 0),
+                               tests=repo.get("tests", 0),
+                               manifest=repo.get("manifest", ""))
+                return summary
+            if data.get("project"):
+                summary.update(kind="project", path=str(data["project"]),
+                               language=str(data.get("language", "python")))
+                return summary
+            if data.get("outputs") or data.get("output"):
+                summary.update(kind="artifact",
+                               outputs=list(data.get("outputs", ())) or
+                               [str(data.get("output"))])
+                return summary
+            return None
 
         def finish_message(self, text, ok):
             if text:
@@ -476,12 +529,14 @@ def run_cinematic_panel():
                 "reparar y entregar evidencia.")
 
         def reset_view(self):
+            cancelled = self.mission_queue.cancel_pending()
             self.chat.clear()
             self.attachments.clear()
             self.plan_label.hide()
             self.prompt.clear()
             self.chat.append(
-                "[SISTEMA] Vista reiniciada. Memoria y auditoría conservadas.")
+                "[SISTEMA] Vista reiniciada. Memoria y auditoría conservadas. "
+                f"Misiones pendientes canceladas: {cancelled}.")
 
         def show_memory(self):
             rows = list(reversed(self.memory.recent("chat", limit=6)))
@@ -492,12 +547,24 @@ def run_cinematic_panel():
                 row["content"].get("role", "?") + ": " +
                 row["content"].get("text", "")[:100] for row in rows)
             self.chat.append("\n[MEMORIA] " + summary)
+            technical_count = self.memory.count("technical")
+            if technical_count:
+                latest = self.memory.recent("technical", limit=1)[0]["content"]
+                self.chat.append(
+                    f"\n[MEMORIA TÉCNICA] {technical_count} evidencias · última: "
+                    + latest.get("objective", "")[:120])
 
         def memory_context(self):
             rows = list(reversed(self.memory.recent("chat", limit=8)))
-            return tuple(
+            context = [
                 row["content"].get("role", "?") + ": " +
-                row["content"].get("text", "")[:1000] for row in rows)
+                row["content"].get("text", "")[:1000] for row in rows]
+            for row in reversed(self.memory.recent("technical", limit=3)):
+                item = row["content"]
+                context.append(
+                    "evidencia técnica: " + item.get("objective", "")[:300] +
+                    " | " + item.get("capability", ""))
+            return tuple(context)
 
         def pick_files(self):
             paths, _ = QFileDialog.getOpenFileNames(
