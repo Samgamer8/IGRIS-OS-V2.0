@@ -28,6 +28,28 @@ class OllamaClient:
         except (OSError, ValueError, urllib.error.URLError):
             return ()
 
+    def select_embedding_model(self) -> str | None:
+        """Elige automaticamente un modelo de embeddings local disponible,
+        priorizando los conocidos y validando el primero con una llamada real."""
+        available = set(self.models())
+        if not available:
+            return None
+        preferred = ("nomic-embed-text", "mxbai-embed-large",
+                     "all-minilm", "bge-m3", "granite-embedding:278m")
+        candidates = [name for name in preferred if name in available]
+        candidates += [name for name in sorted(available)
+                       if any(hint in name for hint in
+                              ("embed", "minilm", "bge", "mxbai"))]
+        seen: set[str] = set()
+        for candidate in candidates:
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            ok, _ = self.embed([".", "test"], candidate)
+            if ok:
+                return candidate
+        return None
+
     def generate(self, prompt: str, model: str) -> ModelReply:
         if not prompt.strip() or not model.strip():
             return ModelReply(False, "", model, "Solicitud incompleta")

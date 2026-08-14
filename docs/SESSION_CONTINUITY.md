@@ -37,10 +37,11 @@ sin inventario, pruebas y autorización expresa.
 
 ## Última entrega verificada
 
-- Pruebas: 128 aprobadas.
+- Pruebas: 132 aprobadas.
 - Release check: aprobado.
 - Recuperación semántica local: `LocalSemanticIndex` (n-gramas hasheados,
-  determinista, sin dependencias) + `OllamaSemanticIndex` opcional con caché;
+  determinista, sin dependencias) + `OllamaSemanticIndex` opcional con caché y
+  autoselección del modelo de embeddings (`OllamaClient.select_embedding_model`);
   integrada en la búsqueda de repositorios y con endpoint `/api/embed` en el cliente.
 - Progreso granular conectado a operaciones largas: análisis y copia de repositorios,
   inventario de fuentes, pipeline multimedia, coordinación de especialistas y
@@ -57,7 +58,8 @@ sin inventario, pruebas y autorización expresa.
    Node presente; faltan TypeScript (tsc), Rust (rustc), C++ (g++), Java (javac).
 3. Ejecutar pruebas reales del motor Godot cuando esté instalado.
 4. Evolucionar búsqueda contextual hacia recuperación semántica local. [HECHO]
-5. Seleccionar automáticamente un modelo de embeddings local cuando Ollama lo tenga.
+5. Seleccionar automáticamente un modelo de embeddings local cuando Ollama lo tenga. [HECHO]
+6. Conectar la búsqueda semántica a la misión contextual en la TUI.
 
 ## Prompt para continuar en otra sesión
 

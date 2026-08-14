@@ -69,14 +69,20 @@ class SemanticMatch:
 
 class OllamaSemanticIndex:
     """Indice semantico con embeddings locales de Ollama. Cacifica los vectores
-    por texto para no repetir llamadas a la API."""
+    por texto para no repetir llamadas a la API. Si no se indica modelo, lo
+    selecciona automaticamente desde el cliente."""
 
-    def __init__(self, client, model: str) -> None:
+    def __init__(self, client, model: str | None = None) -> None:
         self.client = client
-        self.model = model
+        self.model = model or client.select_embedding_model()
         self._cache: dict[str, tuple[float, ...]] = {}
 
+    def available(self) -> bool:
+        return bool(self.model)
+
     def _embed(self, text: str) -> tuple[float, ...] | None:
+        if self.model is None:
+            return None
         if text in self._cache:
             return self._cache[text]
         ok, vectors = self.client.embed([text], self.model)

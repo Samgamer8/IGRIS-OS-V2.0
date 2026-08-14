@@ -65,3 +65,28 @@ def test_ollama_index_handles_failed_embeddings():
 
     index = OllamaSemanticIndex(FailingClient(), "embed")
     assert index.score("a", "b") == 0.0
+
+
+def test_ollama_index_autoselects_model():
+    class SelectingClient:
+        def select_embedding_model(self):
+            return "nomic-embed-text"
+
+        def embed(self, texts, model):
+            assert model == "nomic-embed-text"
+            return True, [[1.0, 0.0] for _ in texts]
+
+    index = OllamaSemanticIndex(SelectingClient())
+    assert index.available()
+    assert index.model == "nomic-embed-text"
+    assert index.score("hola", "mundo") == 1.0
+
+
+def test_ollama_index_reports_unavailable():
+    class EmptyClient:
+        def select_embedding_model(self):
+            return None
+
+    index = OllamaSemanticIndex(EmptyClient())
+    assert not index.available()
+    assert index.score("a", "b") == 0.0
