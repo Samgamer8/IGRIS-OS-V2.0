@@ -40,7 +40,7 @@ sin inventario, pruebas y autorización expresa.
 - Pruebas: 106 aprobadas.
 - Release check: aprobado.
 - Portable probado desde un directorio externo: aprobado.
-- SHA-256: `C1BF9FA6346013A182348C2DE85E3C6DC8313947260ACD9AFCF2E6F067D89884`.
+- SHA-256: `B5CEA2379AC1D4BDE6D8BAD8CCBF32416E6E4665570AB695FC6C57DD6FAFED11`.
 - Voz y dictado locales; voz preferida Microsoft Pablo (español masculino).
 - Auditoría JSONL, workspaces por misión y política central de permisos.
 - Evolución: candidatos medidos, sin autopromoción directa a producción.
