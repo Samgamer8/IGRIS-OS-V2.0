@@ -37,12 +37,15 @@ sin inventario, pruebas y autorización expresa.
 
 ## Última entrega verificada
 
-- Pruebas: 132 aprobadas.
+- Pruebas: 138 aprobadas.
 - Release check: aprobado.
 - Recuperación semántica local: `LocalSemanticIndex` (n-gramas hasheados,
   determinista, sin dependencias) + `OllamaSemanticIndex` opcional con caché y
   autoselección del modelo de embeddings (`OllamaClient.select_embedding_model`);
   integrada en la búsqueda de repositorios y con endpoint `/api/embed` en el cliente.
+- Búsqueda semántica conectada a la misión contextual: `RepositoryContextStore`
+  persiste el índice de repositorios analizados y el panel lo consulta para
+  enriquecer el contexto del asistente con los archivos más relevantes.
 - Progreso granular conectado a operaciones largas: análisis y copia de repositorios,
   inventario de fuentes, pipeline multimedia, coordinación de especialistas y
   desarrollo multilingüe; propagado por el kernel y mostrado en el panel y CLI.
@@ -59,7 +62,8 @@ sin inventario, pruebas y autorización expresa.
 3. Ejecutar pruebas reales del motor Godot cuando esté instalado.
 4. Evolucionar búsqueda contextual hacia recuperación semántica local. [HECHO]
 5. Seleccionar automáticamente un modelo de embeddings local cuando Ollama lo tenga. [HECHO]
-6. Conectar la búsqueda semántica a la misión contextual en la TUI.
+6. Conectar la búsqueda semántica a la misión contextual en la TUI. [HECHO]
+7. Revisar la prioridad siguiente del roadmap tras la entrega verificada.
 
 ## Prompt para continuar en otra sesión
 

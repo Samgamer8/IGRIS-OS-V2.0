@@ -30,7 +30,7 @@ Primera base ejecutable:
 - pipeline multimedia con previsualización, evidencia y rollback confinado;
 - mapa profundo de repositorios con lenguajes, símbolos, dependencias y pruebas;
 - recuperación semántica local (n-gramas hasheados y embeddings Ollama opcionales
-  con autoselección del modelo);
+  con autoselección del modelo) conectada a la misión contextual del panel;
 - copias aisladas de repositorios y propuestas verificadas con diff y rollback;
 - cola persistente de misiones y memoria técnica verificada;
 - progreso monotónico y cancelación cooperativa en puntos seguros;

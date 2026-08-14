@@ -1,3 +1,4 @@
+from .context import RepositoryContextStore
 from .semantic import (
     LocalSemanticIndex,
     OllamaSemanticIndex,
@@ -7,4 +8,4 @@ from .semantic import (
 )
 
 __all__ = ["LocalSemanticIndex", "OllamaSemanticIndex", "SemanticMatch",
-           "SemanticRetriever", "normalize"]
+           "SemanticRetriever", "normalize", "RepositoryContextStore"]

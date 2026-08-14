@@ -29,6 +29,7 @@ class RepositoryReport:
     matches: tuple[dict, ...]
     manifest: str
     truncated: bool
+    records: tuple[dict, ...] = ()
 
 
 class RepositoryAnalyzer:
@@ -89,7 +90,8 @@ class RepositoryAnalyzer:
                             encoding="utf-8")
         return RepositoryReport(len(records), total, dict(languages),
                                 tuple(symbols[:5000]), tuple(sorted(imports)[:2000]),
-                                tuple(tests[:2000]), tuple(matches), str(manifest), truncated)
+                                tuple(tests[:2000]), tuple(matches), str(manifest),
+                                truncated, tuple(records))
 
     @staticmethod
     def _is_test(path: str) -> bool:

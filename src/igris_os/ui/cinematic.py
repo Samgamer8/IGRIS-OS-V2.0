@@ -10,6 +10,7 @@ from igris_os.application import (
 from igris_os.bootstrap import build_igris
 from igris_os.domain import Mission
 from igris_os.memory import MemoryStore
+from igris_os.retrieval import RepositoryContextStore
 from igris_os.ui.galaxia import GalaxiaWidget
 from igris_os.voice import WindowsVoice
 
@@ -200,6 +201,7 @@ def run_cinematic_panel():
             self.router = MissionRouter()
             self.runtime = runtime_root()
             self.kernel = build_igris(self.runtime)
+            self.context_store = RepositoryContextStore(self.runtime)
             self.memory = MemoryStore(self.runtime / "memory" / "chat.db")
             self.mission_queue = MissionQueue(self.runtime / "missions_queue.json")
             self.active_job = None
@@ -427,9 +429,10 @@ def run_cinematic_panel():
                 reply = self.kernel.execute(
                     Mission(job.objective), job.capability, job.payload,
                     confirmed=True, on_progress=report_progress)
+                self.remember_repository_context(reply, job)
             else:
-                reply = self.assistant.respond(
-                    job.objective, self.memory_context())
+                context = self.memory_context() + self.semantic_context(job.objective)
+                reply = self.assistant.respond(job.objective, context)
             self.replies.put((job.id, reply))
 
         def tick(self):
@@ -596,6 +599,14 @@ def run_cinematic_panel():
                     f"\n[MEMORIA TÉCNICA] {technical_count} evidencias · última: "
                     + latest.get("objective", "")[:120])
 
+        def remember_repository_context(self, reply, job):
+            data = getattr(reply, "data", {})
+            repository = data.get("repository") or {}
+            if getattr(reply, "ok", False) and repository.get("records"):
+                root = Path(job.payload.get("root", ""))
+                if root.is_dir():
+                    self.context_store.remember(root, repository["records"])
+
         def memory_context(self):
             rows = list(reversed(self.memory.recent("chat", limit=8)))
             context = [
@@ -607,6 +618,12 @@ def run_cinematic_panel():
                     "evidencia técnica: " + item.get("objective", "")[:300] +
                     " | " + item.get("capability", ""))
             return tuple(context)
+
+        def semantic_context(self, objective):
+            return tuple(
+                "archivo relevante: " + str(item["path"]) +
+                " — " + str(item["excerpt"])[:250]
+                for item in self.context_store.retrieve(objective, limit=4))
 
         def pick_files(self):
             paths, _ = QFileDialog.getOpenFileNames(

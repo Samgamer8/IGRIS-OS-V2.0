@@ -148,13 +148,16 @@ def _repository_analyze(payload):
             on_progress=payload.get("on_progress"))
     except ValueError as exc:
         return ExecutionResult.failure(str(exc), "REPOSITORY_INVALID")
+    records = [{"path": item["path"], "symbols": item.get("symbols", []),
+                "text": item.get("text", "")[:600]}
+               for item in report.records]
     return ExecutionResult.success(
         "Repositorio analizado y mapeado", repository={
             "files": report.files, "bytes_read": report.bytes_read,
             "languages": report.languages, "symbols": len(report.symbols),
             "imports": len(report.imports), "tests": len(report.tests),
             "matches": report.matches, "manifest": report.manifest,
-            "truncated": report.truncated})
+            "truncated": report.truncated, "records": records})
 
 
 def _repository_stage(payload):

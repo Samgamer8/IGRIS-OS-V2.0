@@ -1,6 +1,9 @@
 import json
 
+from igris_os.bootstrap import build_igris
+from igris_os.domain import Mission
 from igris_os.files import RepositoryAnalyzer
+from igris_os.retrieval import RepositoryContextStore
 
 
 def test_repository_map_extracts_structure_and_search(tmp_path):
@@ -52,3 +55,27 @@ def test_repository_analyze_reports_granular_progress(tmp_path):
     assert first >= 1
     assert all(pct <= 100 for pct, _ in events)
     assert events[-1][0] >= 95
+
+
+def test_repository_analyze_indexes_semantic_context(tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "core.py").write_text(
+        "def execute_mission():\n    return 'misiones del sistema'\n",
+        encoding="utf-8")
+    (root / "ui.py").write_text(
+        "def paint_background():\n    pass\n", encoding="utf-8")
+    runtime = tmp_path / "runtime"
+    kernel = build_igris(runtime)
+    result = kernel.execute(
+        Mission("analiza el proyecto"), "repository.analyze",
+        {"root": str(root), "query": "donde se ejecutan las misiones"},
+        confirmed=True)
+    assert result.ok
+    records = result.data["repository"]["records"]
+    assert any(item["path"] == "core.py" for item in records)
+    store = RepositoryContextStore(runtime)
+    store.remember(root, records)
+    hits = store.retrieve("donde se ejecutan las misiones", limit=4)
+    assert hits
+    assert hits[0]["path"] == "core.py"
