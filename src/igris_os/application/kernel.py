@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Callable
 
 from igris_os.application.registry import CapabilityRegistry
 from igris_os.domain import ExecutionResult, Mission
@@ -19,7 +19,8 @@ class IgrisKernel:
         self.workspaces = workspaces
 
     def execute(self, mission: Mission, capability: str,
-                payload: Mapping[str, Any] | None = None, *, confirmed: bool = False) -> ExecutionResult:
+                payload: Mapping[str, Any] | None = None, *, confirmed: bool = False,
+                on_progress: Callable[[int, str], None] | None = None) -> ExecutionResult:
         item = self.registry.get(capability)
         if item is None:
             result = ExecutionResult.failure(f"Capacidad no disponible: {capability}", "NOT_FOUND")
@@ -36,6 +37,8 @@ class IgrisKernel:
         request = dict(payload or {})
         request["mission_id"] = mission.id
         request["workspace"] = str(workspace)
+        if on_progress:
+            request["on_progress"] = on_progress
         try:
             result = handler(request)
             if not isinstance(result, ExecutionResult):

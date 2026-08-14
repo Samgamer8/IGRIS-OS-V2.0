@@ -4,6 +4,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from igris_os.tools import safe_output
 
@@ -38,12 +39,15 @@ class RepositoryAnalyzer:
         self.max_file_bytes = max_file_bytes
         self.max_total_bytes = max_total_bytes
 
-    def analyze(self, root: Path, query: str = "") -> RepositoryReport:
+    def analyze(self, root: Path, query: str = "",
+                on_progress: Callable[[int, str], None] | None = None) -> RepositoryReport:
         root = root.resolve()
         if not root.is_dir() or root.is_symlink():
             raise ValueError("Repositorio no valido")
         records, symbols, imports, tests = [], [], set(), []
         languages, total, truncated = Counter(), 0, False
+        if on_progress:
+            on_progress(1, "Analizando estructura")
         for path in sorted(root.rglob("*")):
             if len(records) >= self.max_files:
                 truncated = True
@@ -71,6 +75,8 @@ class RepositoryAnalyzer:
                             "text": text[:20_000],
                             "symbols": [item["name"] for item in found]})
         matches = self._search(records, query)
+        if on_progress:
+            on_progress(95, "Buscando contexto de la consulta")
         document = {"schema": 1, "root": str(root), "files": len(records),
                     "bytes_read": total, "languages": dict(languages),
                     "symbols": symbols[:5000], "imports": sorted(imports)[:2000],

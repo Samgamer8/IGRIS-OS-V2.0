@@ -1,6 +1,7 @@
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Callable
 
 from igris_os.ai import OllamaClient
 from igris_os.domain import Mission, MissionBranch
@@ -44,13 +45,17 @@ class SpecialistCoordinator:
         self.evidence_root = evidence_root
         self.director = MissionDirector()
 
-    def coordinate(self, objective: str, model: str) -> CoordinationResult:
+    def coordinate(self, objective: str, model: str,
+                   on_progress: Callable[[int, str], None] | None = None) -> CoordinationResult:
         if not objective.strip() or not model:
             raise ValueError("Objetivo y modelo son obligatorios")
         branch = self.director.plan(Mission(objective)).branch
         roles = self.ROLES.get(branch, ("analista", "ejecutor", "verificador"))
         findings = []
-        for role in roles:
+        for position, role in enumerate(roles, 1):
+            if on_progress:
+                on_progress(int(70 * position / (len(roles) + 1)),
+                            f"Consultando especialista {position}/{len(roles)}")
             prompt = (
                 f"Actua como {role}. Analiza esta mision sin inventar ejecuciones. "
                 "Entrega decisiones, riesgos y pruebas necesarias. MISION: " + objective)
@@ -59,6 +64,8 @@ class SpecialistCoordinator:
                 role, model, reply.ok, reply.text if reply.ok else reply.error))
         transcript = "\n\n".join(
             f"{item.role}: {item.text}" for item in findings)
+        if on_progress:
+            on_progress(85, "Revisión cruzada independiente")
         review_prompt = (
             "Eres revisor independiente. Detecta contradicciones, carencias y "
             "afirmaciones sin evidencia. Da un veredicto condicionado a pruebas.\n" +
@@ -68,6 +75,8 @@ class SpecialistCoordinator:
             "revisor_independiente", model, reviewed.ok,
             reviewed.text if reviewed.ok else reviewed.error)
         complete = all(item.ok for item in findings) and review.ok
+        if on_progress:
+            on_progress(96, "Registrando evidencia")
         result = CoordinationResult(
             objective, branch.value, tuple(findings), review, complete)
         if self.evidence_root:

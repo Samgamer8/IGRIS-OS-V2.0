@@ -23,3 +23,13 @@ def test_inventory_json(tmp_path):
     (source / "a.py").write_text("pass", encoding="utf-8")
     write_inventory([source], output)
     assert json.loads(output.read_text(encoding="utf-8"))["schema"] == 1
+
+
+def test_inventory_reports_granular_progress(tmp_path):
+    for name in ("a.txt", "b.txt", "c.txt"):
+        (tmp_path / name).write_text(name, encoding="utf-8")
+    events = []
+    inventory_source(tmp_path, on_progress=lambda pct, msg: events.append((pct, msg)))
+    assert events
+    assert all(1 <= pct <= 100 for pct, _ in events)
+    assert events[-1][0] >= 90

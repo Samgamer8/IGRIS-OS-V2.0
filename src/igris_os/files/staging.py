@@ -3,6 +3,7 @@ import json
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from igris_os.files.repository import EXCLUDED
 from igris_os.tools import safe_output
@@ -27,7 +28,8 @@ class RepositoryStager:
         self.max_file_bytes = max_file_bytes
         self.max_total_bytes = max_total_bytes
 
-    def stage(self, source: Path, *, confirmed: bool = False) -> StagingResult:
+    def stage(self, source: Path, *, confirmed: bool = False,
+              on_progress: Callable[[int, str], None] | None = None) -> StagingResult:
         if not confirmed:
             raise PermissionError("Se necesita confirmacion")
         source = source.resolve()
@@ -39,7 +41,7 @@ class RepositoryStager:
         records, total, truncated = [], 0, False
         target.mkdir(parents=True)
         try:
-            for path in sorted(source.rglob("*")):
+            for index, path in enumerate(sorted(source.rglob("*"))):
                 if len(records) >= self.max_files:
                     truncated = True
                     break
@@ -66,6 +68,11 @@ class RepositoryStager:
                 records.append({"path": relative.as_posix(), "size": size,
                                 "sha256": original_hash})
                 total += size
+                if on_progress:
+                    on_progress(min(95, int(100 * (index + 1) / self.max_files)),
+                                f"Copiando {relative.as_posix()}")
+            if on_progress:
+                on_progress(96, "Escribiendo manifiesto")
             manifest = safe_output(self.workspace, "output/staging_manifest.json")
             manifest.write_text(json.dumps({
                 "schema": 1, "source": str(source), "staged": str(target),

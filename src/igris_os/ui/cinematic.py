@@ -207,6 +207,7 @@ def run_cinematic_panel():
             self.voice_enabled = True
             self.voice_inputs = queue.Queue()
             self.replies = queue.Queue()
+            self.progress_events = queue.Queue()
             self.command_count = 0
             self.attachments = []
             self.canvas = Canvas()
@@ -415,10 +416,17 @@ def run_cinematic_panel():
             threading.Thread(target=self.run_job, args=(job,), daemon=True).start()
 
         def run_job(self, job):
+            def report_progress(percent, message):
+                try:
+                    self.mission_queue.update_progress(
+                        job.id, percent, message)
+                except (KeyError, ValueError):
+                    pass
+                self.progress_events.put((job.id, percent, message))
             if job.kind == "capability":
                 reply = self.kernel.execute(
                     Mission(job.objective), job.capability, job.payload,
-                    confirmed=True)
+                    confirmed=True, on_progress=report_progress)
             else:
                 reply = self.assistant.respond(
                     job.objective, self.memory_context())
@@ -439,7 +447,13 @@ def run_cinematic_panel():
             try:
                 job_id, reply = self.replies.get_nowait()
             except queue.Empty:
-                self.dispatch_next()
+                try:
+                    job_id, percent, message = self.progress_events.get_nowait()
+                    self.status.setText(
+                        f"● Estado: Ejecutando {job_id[:8]} · {percent}% {message}")
+                    self.dispatch_next()
+                except queue.Empty:
+                    self.dispatch_next()
                 return
             text = getattr(reply, "text", getattr(reply, "message", str(reply)))
             ok = bool(getattr(reply, "ok", False))

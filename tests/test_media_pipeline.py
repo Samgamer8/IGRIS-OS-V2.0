@@ -80,3 +80,18 @@ def test_trim_validates_interval_without_running_ffmpeg(tmp_path):
     result = MediaEngine(tmp_path).trim(
         source, "out.mp4", -1, 5, confirmed=True)
     assert not result.ok
+
+
+def test_pipeline_reports_granular_progress(tmp_path):
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"video")
+    events = []
+    result = MediaPipeline(tmp_path / "workspace", FakeEngine).execute(
+        source, [
+            {"kind": "thumbnail", "output": "preview.png"},
+            {"kind": "transcode", "output": "final.mp4"},
+        ], confirmed=True, on_progress=lambda pct, msg: events.append((pct, msg)))
+    assert result.ok
+    assert events
+    assert events[0][0] == 0
+    assert events[-1][0] == 100

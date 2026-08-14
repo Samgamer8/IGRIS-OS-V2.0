@@ -37,18 +37,19 @@ sin inventario, pruebas y autorización expresa.
 
 ## Última entrega verificada
 
-- Pruebas: 106 aprobadas.
+- Pruebas: 118 aprobadas.
 - Release check: aprobado.
-- Portable probado desde un directorio externo: aprobado.
-- SHA-256: `B5CEA2379AC1D4BDE6D8BAD8CCBF32416E6E4665570AB695FC6C57DD6FAFED11`.
-- Voz y dictado locales; voz preferida Microsoft Pablo (español masculino).
-- Auditoría JSONL, workspaces por misión y política central de permisos.
-- Evolución: candidatos medidos, sin autopromoción directa a producción.
+- Progreso granular conectado a operaciones largas: análisis y copia de repositorios,
+  inventario de fuentes, pipeline multimedia, coordinación de especialistas y
+  desarrollo multilingüe; propagado por el kernel y mostrado en el panel y CLI.
+- Corrección de entorno: pytest redirigido a un `basetemp` escribible (la carpeta
+  `pytest-of-samva` quedó con ACL corrupta por el sandbox y bloqueaba 69 pruebas).
+- SHA-256 portable anterior: `B5CEA2379AC1D4BDE6D8BAD8CCBF32416E6E4665570AB695FC6C57DD6FAFED11`.
 
 ## Prioridades siguientes
 
-1. Instalar o aislar toolchains para ejecutar pruebas multilenguaje sin riesgo.
-2. Conectar indicadores de progreso granular a todas las operaciones largas.
+1. Conectar indicadores de progreso granular a todas las operaciones largas. [HECHO]
+2. Instalar o aislar toolchains para ejecutar pruebas multilenguaje sin riesgo.
 3. Ejecutar pruebas reales del motor Godot cuando esté instalado.
 4. Evolucionar búsqueda contextual hacia recuperación semántica local.
 

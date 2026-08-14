@@ -23,7 +23,8 @@ class MediaPipeline:
         self.engine = engine_factory(self.workspace)
 
     def execute(self, source: Path, operations: list[dict], *,
-                confirmed: bool = False) -> PipelineResult:
+                confirmed: bool = False,
+                on_progress: Callable[[int, str], None] | None = None) -> PipelineResult:
         if not confirmed:
             return PipelineResult(False, "Se necesita confirmacion")
         if not source.is_file() or source.is_symlink():
@@ -35,6 +36,9 @@ class MediaPipeline:
         for index, operation in enumerate(operations, 1):
             kind = str(operation.get("kind", ""))
             output = str(operation.get("output", f"paso_{index}.bin"))
+            if on_progress:
+                on_progress(int(100 * (index - 1) / len(operations)),
+                            f"Paso {index}/{len(operations)}: {kind}")
             try:
                 target = safe_output(self.workspace, output)
             except ValueError as exc:
@@ -47,7 +51,11 @@ class MediaPipeline:
                 return self._failure(result.message, evidence, created)
             if target.is_file():
                 created.append(target)
+        if on_progress:
+            on_progress(98, "Generando informe")
         report = self._report(True, evidence, False)
+        if on_progress:
+            on_progress(100, "Plan multimedia completado")
         return PipelineResult(True, "Plan multimedia completado",
                               tuple(str(path) for path in created),
                               str(report), False)

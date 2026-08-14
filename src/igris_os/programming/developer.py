@@ -2,6 +2,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from igris_os.ai import ModelReply
 from igris_os.programming.workshop import PythonWorkshop
@@ -38,7 +39,8 @@ class PythonProjectDeveloper:
         self.model = model
 
     def develop(self, objective: str, *, confirmed: bool = False,
-                attempts: int = 3) -> DevelopmentResult:
+                attempts: int = 3,
+                on_progress: Callable[[int, str], None] | None = None) -> DevelopmentResult:
         if not confirmed:
             return DevelopmentResult(False, "Se necesita confirmacion")
         if not objective.strip():
@@ -46,6 +48,9 @@ class PythonProjectDeveloper:
         feedback = ""
         last_error = ""
         for attempt in range(1, attempts + 1):
+            if on_progress:
+                on_progress(int(90 * attempt / attempts),
+                            f"Intento {attempt}/{attempts} de generación")
             prompt = SYSTEM + "\nOBJETIVO:\n" + objective
             if feedback:
                 prompt += "\nERROR VERIFICADO ANTERIOR:\n" + feedback[-1500:]
@@ -68,6 +73,8 @@ class PythonProjectDeveloper:
                     last_error = report.message
                     feedback = last_error
                     continue
+                if on_progress:
+                    on_progress(95, "Entregando proyecto verificado")
                 target = safe_output(self.workspace, "projects/" + name)
                 if target.exists():
                     name += "_" + report.sha256[:8]

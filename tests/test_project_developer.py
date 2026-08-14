@@ -27,3 +27,14 @@ def test_developer_delivers_verified_project(tmp_path):
 def test_developer_requires_confirmation(tmp_path):
     result = PythonProjectDeveloper(FakeClient(), tmp_path, "fake").develop("x")
     assert not result.ok
+
+
+def test_developer_reports_granular_progress(tmp_path):
+    events = []
+    result = PythonProjectDeveloper(FakeClient(), tmp_path, "fake").develop(
+        "crea calculadora", confirmed=True,
+        on_progress=lambda pct, msg: events.append((pct, msg)))
+    assert result.ok
+    assert events
+    assert all(1 <= pct <= 100 for pct, _ in events)
+    assert events[-1][0] >= 90

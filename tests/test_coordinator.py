@@ -33,3 +33,14 @@ def test_specialist_failure_prevents_complete_result(tmp_path):
         "crea un videojuego", "coder")
     assert not result.complete
     assert not result.findings[1].ok
+
+
+def test_coordinate_reports_granular_progress(tmp_path):
+    events = []
+    result = SpecialistCoordinator(FakeClient(), tmp_path).coordinate(
+        "programa una API Python", "coder",
+        on_progress=lambda pct, msg: events.append((pct, msg)))
+    assert result.complete
+    assert events
+    assert all(0 <= pct <= 100 for pct, _ in events)
+    assert events[-1][0] >= 90

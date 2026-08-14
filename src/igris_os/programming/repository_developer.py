@@ -3,6 +3,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from igris_os.files import RepositoryAnalyzer, RepositoryStager
 from igris_os.programming.languages import PROFILES, LanguageVerifier
@@ -23,11 +24,16 @@ class RepositoryDeveloper:
         self.client, self.workspace, self.model = client, workspace.resolve(), model
 
     def propose(self, source: Path, objective: str, *,
-                confirmed: bool = False) -> RepositoryDevelopmentResult:
+                confirmed: bool = False,
+                on_progress: Callable[[int, str], None] | None = None) -> RepositoryDevelopmentResult:
         if not confirmed:
             return RepositoryDevelopmentResult(False, "Se necesita confirmacion")
+        if on_progress:
+            on_progress(15, "Creando copia aislada")
         staged = RepositoryStager(self.workspace).stage(source, confirmed=True)
         root = Path(staged.root)
+        if on_progress:
+            on_progress(40, "Analizando repositorio aislado")
         analysis = RepositoryAnalyzer(self.workspace).analyze(root, objective)
         context = "\n\n".join(
             "ARCHIVO " + item["path"] + "\n" + item["excerpt"]
@@ -37,6 +43,8 @@ class RepositoryDeveloper:
             '{"summary":"resumen","changes":[{"path":"ruta relativa",'
             '"content":"archivo completo"}]}. Máximo 12 archivos, sin borrar. '
             "\nOBJETIVO:\n" + objective + "\nCONTEXTO:\n" + context)
+        if on_progress:
+            on_progress(60, "Generando propuesta de cambios")
         reply = self.client.generate(prompt, self.model)
         if not reply.ok:
             return RepositoryDevelopmentResult(
@@ -48,6 +56,8 @@ class RepositoryDeveloper:
             changes = package.get("changes")
             if not isinstance(changes, list) or not 1 <= len(changes) <= 12:
                 raise ValueError("Paquete de cambios invalido")
+            if on_progress:
+                on_progress(80, "Aplicando y verificando cambios")
             return self._apply(root, package)
         except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
             return RepositoryDevelopmentResult(False, str(exc), staged.root)

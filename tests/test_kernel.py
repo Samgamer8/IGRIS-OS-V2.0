@@ -44,3 +44,29 @@ def test_audit_recent_skips_corrupt_lines(tmp_path):
     events = audit.recent()
     assert len(events) == 1
     assert events[0]["capability"] == "health"
+
+
+def test_kernel_forwards_progress_callback_to_handler(tmp_path):
+    kernel, registry = make_kernel(tmp_path)
+    seen = []
+
+    def handler(request):
+        callback = request.get("on_progress")
+        if callback:
+            callback(50, "mitad")
+        return ExecutionResult.success("ok")
+
+    registry.register(
+        CapabilitySpec("prog", "progreso", ActionRisk.READ_ONLY), handler)
+    result = kernel.execute(
+        Mission("prueba"), "prog", on_progress=lambda pct, msg: seen.append((pct, msg)))
+    assert result.ok
+    assert seen == [(50, "mitad")]
+
+
+def test_kernel_executes_without_progress_callback(tmp_path):
+    kernel, registry = make_kernel(tmp_path)
+    registry.register(
+        CapabilitySpec("plain", "simple", ActionRisk.READ_ONLY),
+        lambda request: ExecutionResult.success("ok"))
+    assert kernel.execute(Mission("prueba"), "plain").ok

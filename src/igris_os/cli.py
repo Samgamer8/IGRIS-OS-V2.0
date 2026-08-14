@@ -1,5 +1,6 @@
 import argparse
 import json
+import sys
 from pathlib import Path
 
 from igris_os.application import MissionDirector
@@ -7,6 +8,11 @@ from igris_os.bootstrap import build_igris
 from igris_os.domain import Mission
 from igris_os.models import default_providers
 from igris_os.storage.source_inventory import write_inventory
+
+
+def _report_progress(percent: int, message: str) -> None:
+    sys.stderr.write(f"\r[{percent:3d}%] {message}")
+    sys.stderr.flush()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -38,7 +44,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "inventory":
         if not args.source:
             parser.error("inventory necesita --source")
-        result = write_inventory([Path(item) for item in args.source], Path(args.output))
+        result = write_inventory([Path(item) for item in args.source],
+                                 Path(args.output),
+                                 on_progress=_report_progress)
+        sys.stderr.write("\n")
         print(json.dumps({"sources": len(result["sources"]),
                           "files": sum(s["file_count"] for s in result["sources"]),
                           "output": args.output}, ensure_ascii=False, indent=2))

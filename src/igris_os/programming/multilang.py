@@ -3,6 +3,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from igris_os.programming.languages import PROFILES, LanguageVerifier
 from igris_os.tools import safe_output
@@ -38,7 +39,8 @@ class MultiLanguageDeveloper:
         self.model = model
 
     def develop(self, objective: str, language: str, *, confirmed: bool = False,
-                attempts: int = 3) -> MultiLanguageResult:
+                attempts: int = 3,
+                on_progress: Callable[[int, str], None] | None = None) -> MultiLanguageResult:
         key = language.casefold()
         profile = PROFILES.get(key)
         if not confirmed:
@@ -47,6 +49,9 @@ class MultiLanguageDeveloper:
             return MultiLanguageResult(False, "Lenguaje no compatible")
         feedback = ""
         for attempt in range(1, attempts + 1):
+            if on_progress:
+                on_progress(int(90 * attempt / attempts),
+                            f"Intento {attempt}/{attempts} de generación")
             prompt = (
                 "Actua como ingeniero senior. Devuelve solo JSON UTF-8 con "
                 '{"name":"nombre","source":"codigo completo",'
@@ -105,6 +110,8 @@ class MultiLanguageDeveloper:
                      "tests_syntax_valid": tests_syntax_valid,
                      "tests_executed": False},
                     indent=2), encoding="utf-8")
+                if on_progress:
+                    on_progress(95, "Entregando proyecto verificado")
                 return MultiLanguageResult(
                     True, "Proyecto generado y verificado", str(target), attempt)
             except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:

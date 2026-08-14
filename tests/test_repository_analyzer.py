@@ -38,3 +38,17 @@ def test_repository_limits_are_reported(tmp_path):
         tmp_path / "workspace", max_files=2).analyze(root)
     assert report.files == 2
     assert report.truncated
+
+
+def test_repository_analyze_reports_granular_progress(tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "app.py").write_text("class A:\n    pass\n", encoding="utf-8")
+    events = []
+    RepositoryAnalyzer(tmp_path / "workspace").analyze(
+        root, "app", on_progress=lambda pct, msg: events.append((pct, msg)))
+    assert events
+    first = events[0][0]
+    assert first >= 1
+    assert all(pct <= 100 for pct, _ in events)
+    assert events[-1][0] >= 95

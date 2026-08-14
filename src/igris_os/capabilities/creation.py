@@ -79,7 +79,8 @@ def _develop_python(payload):
     client = OllamaClient(timeout=float(payload.get("timeout", 180)))
     result = PythonProjectDeveloper(
         client, Path(payload["workspace"]), model).develop(
-            objective, confirmed=True)
+            objective, confirmed=True,
+            on_progress=payload.get("on_progress"))
     if not result.ok:
         return ExecutionResult.failure(result.message, "DEVELOPMENT_FAILED")
     return ExecutionResult.success(result.message, project=result.project,
@@ -93,7 +94,8 @@ def _develop_multilang(payload):
     client = OllamaClient(timeout=float(payload.get("timeout", 180)))
     result = MultiLanguageDeveloper(
         client, Path(payload["workspace"]), model).develop(
-            objective, language, confirmed=True)
+            objective, language, confirmed=True,
+            on_progress=payload.get("on_progress"))
     if not result.ok:
         return ExecutionResult.failure(result.message, "DEVELOPMENT_FAILED")
     return ExecutionResult.success(result.message, project=result.project,
@@ -142,7 +144,8 @@ def _inspect_files(payload):
 def _repository_analyze(payload):
     try:
         report = RepositoryAnalyzer(Path(payload["workspace"])).analyze(
-            Path(payload["root"]), str(payload.get("query", "")))
+            Path(payload["root"]), str(payload.get("query", "")),
+            on_progress=payload.get("on_progress"))
     except ValueError as exc:
         return ExecutionResult.failure(str(exc), "REPOSITORY_INVALID")
     return ExecutionResult.success(
@@ -157,7 +160,8 @@ def _repository_analyze(payload):
 def _repository_stage(payload):
     try:
         result = RepositoryStager(Path(payload["workspace"])).stage(
-            Path(payload["root"]), confirmed=True)
+            Path(payload["root"]), confirmed=True,
+            on_progress=payload.get("on_progress"))
     except (ValueError, OSError, PermissionError) as exc:
         return ExecutionResult.failure(str(exc), "REPOSITORY_STAGE_FAILED")
     return ExecutionResult.success(
@@ -175,7 +179,7 @@ def _repository_develop(payload):
         client, Path(payload["workspace"]),
         str(payload.get("model", "qwen2.5-coder:7b"))).propose(
             Path(payload["root"]), str(payload.get("objective", "")),
-            confirmed=True)
+            confirmed=True, on_progress=payload.get("on_progress"))
     if not result.ok:
         return ExecutionResult.failure(result.message, "REPOSITORY_DEVELOP_FAILED")
     return ExecutionResult.success(
@@ -190,7 +194,8 @@ def _coordinate(payload):
     result = SpecialistCoordinator(
         OllamaClient(timeout=float(payload.get("timeout", 240))),
         Path(payload["workspace"]) / "evidence").coordinate(
-            str(payload.get("objective", "")), model)
+            str(payload.get("objective", "")), model,
+            on_progress=payload.get("on_progress"))
     if not result.complete:
         return ExecutionResult.failure(
             "La coordinacion no supero todos los especialistas",
@@ -243,7 +248,8 @@ def _media_pipeline(payload):
     if not isinstance(operations, list):
         return ExecutionResult.failure("Plan multimedia invalido", "MEDIA_FAILED")
     result = MediaPipeline(Path(payload["workspace"])).execute(
-        Path(payload["source"]), operations, confirmed=True)
+        Path(payload["source"]), operations, confirmed=True,
+        on_progress=payload.get("on_progress"))
     if not result.ok:
         return ExecutionResult(
             False,
