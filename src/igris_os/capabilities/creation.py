@@ -6,10 +6,11 @@ from igris_os.ai import OllamaClient
 from igris_os.application import CapabilityRegistry
 from igris_os.domain import ActionRisk, CapabilitySpec, ExecutionResult
 from igris_os.games import GodotProjectFactory
-from igris_os.files import RepositoryAnalyzer
+from igris_os.files import RepositoryAnalyzer, RepositoryStager
 from igris_os.multimedia import ImageEngine, MediaEngine, MediaPipeline
 from igris_os.programming import (
     LanguageVerifier, MultiLanguageDeveloper, PythonProjectDeveloper,
+    RepositoryDeveloper,
 )
 
 
@@ -40,6 +41,14 @@ def register_creation_capabilities(registry: CapabilityRegistry) -> None:
         CapabilitySpec("repository.analyze",
                        "Mapea símbolos, dependencias y pruebas de un repositorio",
                        ActionRisk.WRITE_WORKSPACE, True), _repository_analyze)
+    registry.register(
+        CapabilitySpec("repository.stage",
+                       "Crea una copia aislada y verificada de un repositorio",
+                       ActionRisk.WRITE_WORKSPACE, True), _repository_stage)
+    registry.register(
+        CapabilitySpec("repository.develop",
+                       "Propone cambios verificados sobre una copia aislada",
+                       ActionRisk.WRITE_WORKSPACE, True), _repository_develop)
     for name, description, handler in (
         ("image.resize", "Redimensiona una imagen", _resize_image),
         ("multimedia.extract_audio", "Extrae audio de un archivo", _extract_audio),
@@ -139,6 +148,37 @@ def _repository_analyze(payload):
             "imports": len(report.imports), "tests": len(report.tests),
             "matches": report.matches, "manifest": report.manifest,
             "truncated": report.truncated})
+
+
+def _repository_stage(payload):
+    try:
+        result = RepositoryStager(Path(payload["workspace"])).stage(
+            Path(payload["root"]), confirmed=True)
+    except (ValueError, OSError, PermissionError) as exc:
+        return ExecutionResult.failure(str(exc), "REPOSITORY_STAGE_FAILED")
+    return ExecutionResult.success(
+        "Copia aislada del repositorio creada y verificada",
+        staged_repository={"root": result.root, "files": result.files,
+                           "total_bytes": result.total_bytes,
+                           "manifest": result.manifest,
+                           "verified": result.verified,
+                           "truncated": result.truncated})
+
+
+def _repository_develop(payload):
+    client = OllamaClient(timeout=float(payload.get("timeout", 240)))
+    result = RepositoryDeveloper(
+        client, Path(payload["workspace"]),
+        str(payload.get("model", "qwen2.5-coder:7b"))).propose(
+            Path(payload["root"]), str(payload.get("objective", "")),
+            confirmed=True)
+    if not result.ok:
+        return ExecutionResult.failure(result.message, "REPOSITORY_DEVELOP_FAILED")
+    return ExecutionResult.success(
+        result.message, repository_changes={
+            "staged_root": result.staged_root, "report": result.report,
+            "changed_files": result.changed_files,
+            "original_modified": False})
 
 
 def _media_result(result):

@@ -57,6 +57,20 @@ def format_result(data):
                 "\nLenguajes: " + languages +
                 ("\n[ARCHIVOS RELEVANTES]\n" + matches if matches else "") +
                 "\n[MANIFIESTO] " + str(repo.get("manifest", "")))
+    if data.get("staged_repository"):
+        staged = data["staged_repository"]
+        return ("\n[COPIA AISLADA VERIFICADA]"
+                f"\nArchivos: {staged.get('files', 0)} · "
+                f"Bytes: {staged.get('total_bytes', 0)}"
+                "\n[WORKSPACE] " + str(staged.get("root", "")) +
+                "\n[MANIFIESTO] " + str(staged.get("manifest", "")))
+    if data.get("repository_changes"):
+        changes = data["repository_changes"]
+        files = "\n".join("• " + str(item)
+                          for item in changes.get("changed_files", ()))
+        return ("\n[CAMBIOS PROPUESTOS EN COPIA AISLADA]\n" + files +
+                "\n[DIFF] " + str(changes.get("report", "")) +
+                "\n[ORIGINAL] Sin modificar")
     if data.get("project"):
         return "\n[PROYECTO ENTREGADO] " + str(data["project"])
     if data.get("output"):
@@ -468,6 +482,20 @@ def run_cinematic_panel():
                                symbols=repo.get("symbols", 0),
                                tests=repo.get("tests", 0),
                                manifest=repo.get("manifest", ""))
+                return summary
+            if data.get("staged_repository"):
+                staged = data["staged_repository"]
+                summary.update(kind="staged_repository",
+                               path=staged.get("root", ""),
+                               files=staged.get("files", 0),
+                               manifest=staged.get("manifest", ""))
+                return summary
+            if data.get("repository_changes"):
+                changes = data["repository_changes"]
+                summary.update(kind="repository_changes",
+                               path=changes.get("staged_root", ""),
+                               report=changes.get("report", ""),
+                               files=list(changes.get("changed_files", ())))
                 return summary
             if data.get("project"):
                 summary.update(kind="project", path=str(data["project"]),

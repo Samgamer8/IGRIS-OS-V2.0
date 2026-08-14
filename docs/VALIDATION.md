@@ -4,7 +4,7 @@ Fecha: 2026-08-14.
 
 ## Puertas aprobadas
 
-- Suite unitaria, integración y seguridad: 81 pruebas aprobadas.
+- Suite unitaria, integración y seguridad: 97 pruebas aprobadas.
 - Arranque del panel PyQt6 en modo offscreen: aprobado.
 - Build PyInstaller para Windows: aprobado.
 - Arranque del ejecutable y captura visual: aprobado.
@@ -20,6 +20,10 @@ Fecha: 2026-08-14.
   aprobado.
 - Autoanálisis del repositorio IGRIS: 85 archivos, 304 símbolos y 23 archivos
   de prueba mapeados; búsqueda de seguridad localizada correctamente.
+- Edición real con qwen coder sobre copia aislada: función añadida, diff generado,
+  verificación aprobada y original intacto.
+- Copia aislada real del repositorio: 101 archivos con hashes verificados.
+- Cola recuperable, memoria técnica y evolución en cuarentena: aprobadas.
 
 ## Comandos reproducibles
 

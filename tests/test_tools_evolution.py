@@ -16,3 +16,19 @@ def test_evolution_only_promotes_measured_improvement(tmp_path):
     assert good.promotable
     assert not bad.promotable
     assert EvolutionLab(tmp_path).record(good).exists()
+
+
+def test_evolution_gate_requires_tests_security_and_improvement(tmp_path):
+    lab = EvolutionLab(tmp_path)
+    good = lab.compare(
+        "candidate_good",
+        {"tests": 90, "security": 95, "quality": 70, "performance": 70},
+        {"tests": 100, "security": 100, "quality": 80, "performance": 75})
+    bad = lab.compare(
+        "candidate_bad",
+        {"tests": 95, "security": 95, "quality": 80, "performance": 80},
+        {"tests": 90, "security": 100, "quality": 90, "performance": 90})
+    assert __import__("json").loads(good.read_text())["promotable_to_review"]
+    assert not __import__("json").loads(bad.read_text())["promotable_to_review"]
+    assert len(lab.reviewable()) == 1
+    assert all(not item["production_promoted"] for item in lab.reviewable())

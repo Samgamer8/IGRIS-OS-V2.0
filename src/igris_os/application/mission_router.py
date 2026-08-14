@@ -29,6 +29,16 @@ class MissionRouter:
             return RoutedAction("capability", "system.tools")
         source = str(Path(attachments[0]).resolve()) if attachments else ""
         if source and Path(source).is_dir() and any(word in low for word in (
+                "modifica", "arregla", "implementa", "corrige", "programa")):
+            return RoutedAction(
+                "capability", "repository.develop",
+                {"root": source, "objective": objective}, True)
+        if source and Path(source).is_dir() and any(phrase in low for phrase in (
+                "copia aislada", "prepara este proyecto", "trabaja en este proyecto",
+                "prepara el repositorio")):
+            return RoutedAction(
+                "capability", "repository.stage", {"root": source}, True)
+        if source and Path(source).is_dir() and any(word in low for word in (
                 "repositorio", "proyecto", "código", "codigo", "carpeta")):
             return RoutedAction(
                 "capability", "repository.analyze",

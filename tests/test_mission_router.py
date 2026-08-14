@@ -75,3 +75,16 @@ def test_repository_folder_routes_to_deep_analysis(tmp_path):
         "analiza este repositorio y su código", [str(tmp_path)])
     assert action.capability == "repository.analyze"
     assert action.requires_confirmation
+
+
+def test_repository_work_routes_to_isolated_copy(tmp_path):
+    action = MissionRouter().route(
+        "prepara este proyecto para trabajar", [str(tmp_path)])
+    assert action.capability == "repository.stage"
+
+
+def test_repository_change_routes_to_isolated_developer(tmp_path):
+    action = MissionRouter().route(
+        "implementa una función nueva en este proyecto", [str(tmp_path)])
+    assert action.capability == "repository.develop"
+    assert action.requires_confirmation

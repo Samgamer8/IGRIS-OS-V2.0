@@ -45,3 +45,19 @@ def test_repository_map_is_human_readable():
     assert "MAPA DEL REPOSITORIO" in rendered
     assert "src/app.py" in rendered
     assert "map.json" in rendered
+
+
+def test_staged_repository_is_human_readable():
+    rendered = format_result({"staged_repository": {
+        "files": 20, "total_bytes": 4000, "root": "workspace/repository",
+        "manifest": "staging.json", "verified": True}})
+    assert "COPIA AISLADA VERIFICADA" in rendered
+    assert "workspace/repository" in rendered
+
+
+def test_repository_changes_explain_original_is_safe():
+    rendered = format_result({"repository_changes": {
+        "changed_files": ["app.py"], "report": "changes.diff",
+        "original_modified": False}})
+    assert "CAMBIOS PROPUESTOS" in rendered
+    assert "Sin modificar" in rendered

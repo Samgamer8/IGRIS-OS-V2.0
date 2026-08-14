@@ -29,6 +29,9 @@ Primera base ejecutable:
 - adjuntos conectados a análisis, imagen, vídeo y audio;
 - pipeline multimedia con previsualización, evidencia y rollback confinado;
 - mapa profundo de repositorios con lenguajes, símbolos, dependencias y pruebas;
+- copias aisladas de repositorios y propuestas verificadas con diff y rollback;
+- cola persistente de misiones y memoria técnica verificada;
+- evolución medida en cuarentena, sin autopromoción a producción;
 - plantilla Godot 2D jugable con verificación;
 - esquema de continuidad en `docs/SESSION_CONTINUITY.md`.
 
