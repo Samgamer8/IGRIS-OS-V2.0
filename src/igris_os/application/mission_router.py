@@ -89,6 +89,7 @@ class MissionRouter:
             "javascript": ("javascript", "node.js", "nodejs"),
             "typescript": ("typescript",), "rust": ("rust",),
             "cpp": ("c++", "cpp"), "java": ("java",),
+            "go": ("golang", "en go", "go lang", "programa go", "c\u00f3digo go", "codigo go"),
         }
         if plan.branch is MissionBranch.PROGRAMMING:
             for language, aliases in languages.items():

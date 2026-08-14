@@ -43,6 +43,13 @@ def test_javascript_syntax_when_node_available(tmp_path):
     assert result.ok if shutil.which("node") else not result.available
 
 
+def test_go_syntax_when_gofmt_available(tmp_path):
+    source = tmp_path / "main.go"
+    source.write_text("package main\nfunc main() {}\n", encoding="utf-8")
+    result = LanguageVerifier().check("go", source)
+    assert result.ok if shutil.which("gofmt") else not result.available
+
+
 def test_unknown_language_is_controlled(tmp_path):
     result = LanguageVerifier().check("unknown", tmp_path / "x")
     assert not result.ok and not result.available

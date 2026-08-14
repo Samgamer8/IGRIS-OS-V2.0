@@ -24,7 +24,7 @@ sin inventario, pruebas y autorización expresa.
 - Chat local con Ollama y selección de modelo por especialidad.
 - Memoria SQLite verificada y contexto limitado.
 - Programación Python con pruebas y reparación; JavaScript, TypeScript, Rust,
-  C++ y Java con verificación de herramientas locales.
+  C++ y Java con verificación de herramientas locales; Go verificado con gofmt.
 - Adjuntos: análisis, imagen, extracción de audio, miniatura y transcodificación.
 - Pipeline multimedia encadenado con previsualización, evidencia y rollback.
 - Mapa profundo de repositorios con búsqueda contextual y límites de lectura.
@@ -37,11 +37,12 @@ sin inventario, pruebas y autorización expresa.
 
 ## Última entrega verificada
 
-- Pruebas: 118 aprobadas.
+- Pruebas: 120 aprobadas.
 - Release check: aprobado.
 - Progreso granular conectado a operaciones largas: análisis y copia de repositorios,
   inventario de fuentes, pipeline multimedia, coordinación de especialistas y
   desarrollo multilingüe; propagado por el kernel y mostrado en el panel y CLI.
+- Go incorporado como lenguaje verificable (gofmt -e) y enrutable por el router.
 - Corrección de entorno: pytest redirigido a un `basetemp` escribible (la carpeta
   `pytest-of-samva` quedó con ACL corrupta por el sandbox y bloqueaba 69 pruebas).
 - SHA-256 portable anterior: `B5CEA2379AC1D4BDE6D8BAD8CCBF32416E6E4665570AB695FC6C57DD6FAFED11`.
@@ -49,7 +50,8 @@ sin inventario, pruebas y autorización expresa.
 ## Prioridades siguientes
 
 1. Conectar indicadores de progreso granular a todas las operaciones largas. [HECHO]
-2. Instalar o aislar toolchains para ejecutar pruebas multilenguaje sin riesgo.
+2. Aislar toolchains para pruebas multilenguaje sin riesgo: Go verificado (gofmt),
+   Node presente; faltan TypeScript (tsc), Rust (rustc), C++ (g++), Java (javac).
 3. Ejecutar pruebas reales del motor Godot cuando esté instalado.
 4. Evolucionar búsqueda contextual hacia recuperación semántica local.
 

@@ -19,6 +19,7 @@ PROFILES = {
     "javascript": LanguageProfile("javascript", (".js",), "node", ("--check",)),
     "typescript": LanguageProfile("typescript", (".ts", ".tsx"), "tsc",
                                   ("--noEmit", "--pretty", "false")),
+    "go": LanguageProfile("go", (".go",), "gofmt", ("-e",)),
     "rust": LanguageProfile("rust", (".rs",), "rustc",
                             ("--crate-type", "lib", "--emit", "metadata")),
     "cpp": LanguageProfile("cpp", (".cpp", ".cc"), "g++",
