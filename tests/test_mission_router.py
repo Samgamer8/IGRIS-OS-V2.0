@@ -50,6 +50,12 @@ def test_go_creation_routes_to_multilang_developer():
     assert action.payload["language"] == "go"
 
 
+def test_typescript_creation_routes_to_multilang_developer():
+    action = MissionRouter().route("crea un programa TypeScript de tareas")
+    assert action.capability == "programming.multilang.develop"
+    assert action.payload["language"] == "typescript"
+
+
 def test_capability_question_uses_real_catalog():
     action = MissionRouter().route("que puedes hacer y cuales son tus funciones")
     assert action.capability == "system.capabilities"

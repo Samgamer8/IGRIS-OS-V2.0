@@ -52,3 +52,29 @@ def test_javascript_dangerous_operations_are_blocked(tmp_path, monkeypatch):
             "demo", "javascript", confirmed=True, attempts=1)
     assert not result.ok
     assert "peligrosa" in result.message
+
+
+class TypeScriptClient:
+    def generate(self, prompt, model):
+        package = {"name": "demo_ts",
+                   "source": "const value: number = 2 + 2;\nexport default value;",
+                   "tests": "const other: string = 'ok';\nexport {};",
+                   "readme": "npx tsc main.ts"}
+        return ModelReply(True, json.dumps(package), model)
+
+
+def test_multilang_developer_delivers_typescript_project(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "igris_os.programming.multilang.LanguageVerifier.check",
+        lambda self, language, source: LanguageCheck(True, True, "Sintaxis valida"))
+    result = MultiLanguageDeveloper(
+        TypeScriptClient(), tmp_path, "coder").develop(
+            "crea una utilidad", "typescript", confirmed=True)
+    assert result.ok
+    project = tmp_path / "projects" / "demo_ts"
+    assert (project / "main.ts").is_file()
+    assert (project / "test.ts").is_file()
+    evidence = json.loads(
+        (project / "VERIFICATION.json").read_text(encoding="utf-8"))
+    assert evidence["language"] == "typescript"
+    assert evidence["tests_syntax_valid"] is None

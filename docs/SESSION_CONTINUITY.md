@@ -23,8 +23,8 @@ sin inventario, pruebas y autorización expresa.
 - Panel militar cinematográfico conectado al núcleo.
 - Chat local con Ollama y selección de modelo por especialidad.
 - Memoria SQLite verificada y contexto limitado.
-- Programación Python con pruebas y reparación; JavaScript, TypeScript, Rust,
-  C++ y Java con verificación de herramientas locales; Go verificado con gofmt.
+- Programación Python con pruebas y reparación; JavaScript con Node, TypeScript con
+  npx, Go con gofmt; Rust, C++ y Java pendientes de toolchain local.
 - Adjuntos: análisis, imagen, extracción de audio, miniatura y transcodificación.
 - Pipeline multimedia encadenado con previsualización, evidencia y rollback.
 - Mapa profundo de repositorios con búsqueda contextual y límites de lectura.
@@ -37,8 +37,10 @@ sin inventario, pruebas y autorización expresa.
 
 ## Última entrega verificada
 
-- Pruebas: 138 aprobadas.
+- Pruebas: 141 aprobadas.
 - Release check: aprobado.
+- TypeScript verificado vía `npx --yes -p typescript tsc` (Node ya estaba
+  instalado; no requiere toolchain global). TypeScript enrutable por el router.
 - Recuperación semántica local: `LocalSemanticIndex` (n-gramas hasheados,
   determinista, sin dependencias) + `OllamaSemanticIndex` opcional con caché y
   autoselección del modelo de embeddings (`OllamaClient.select_embedding_model`);
@@ -58,12 +60,13 @@ sin inventario, pruebas y autorización expresa.
 
 1. Conectar indicadores de progreso granular a todas las operaciones largas. [HECHO]
 2. Aislar toolchains para pruebas multilenguaje sin riesgo: Go verificado (gofmt),
-   Node presente; faltan TypeScript (tsc), Rust (rustc), C++ (g++), Java (javac).
+   TypeScript verificado (npx), Node presente; faltan Rust (rustc), C++ (g++),
+   Java (javac).
 3. Ejecutar pruebas reales del motor Godot cuando esté instalado.
 4. Evolucionar búsqueda contextual hacia recuperación semántica local. [HECHO]
 5. Seleccionar automáticamente un modelo de embeddings local cuando Ollama lo tenga. [HECHO]
 6. Conectar la búsqueda semántica a la misión contextual en la TUI. [HECHO]
-7. Revisar la prioridad siguiente del roadmap tras la entrega verificada.
+7. Verificar Rust, C++ o Java cuando sus toolchains estén instaladas.
 
 ## Prompt para continuar en otra sesión
 

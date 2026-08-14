@@ -50,6 +50,14 @@ def test_go_syntax_when_gofmt_available(tmp_path):
     assert result.ok if shutil.which("gofmt") else not result.available
 
 
+def test_typescript_syntax_when_npx_available(tmp_path):
+    source = tmp_path / "main.ts"
+    source.write_text("const value: number = 2 + 2;\nexport default value;\n",
+                      encoding="utf-8")
+    result = LanguageVerifier().check("typescript", source)
+    assert result.ok if shutil.which("npx") else not result.available
+
+
 def test_unknown_language_is_controlled(tmp_path):
     result = LanguageVerifier().check("unknown", tmp_path / "x")
     assert not result.ok and not result.available
