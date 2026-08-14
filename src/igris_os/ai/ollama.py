@@ -3,7 +3,6 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
-
 @dataclass(frozen=True, slots=True)
 class ModelReply:
     ok: bool
@@ -44,3 +43,22 @@ class OllamaClient:
                               "" if text else "Respuesta vacia")
         except (OSError, ValueError, urllib.error.URLError) as exc:
             return ModelReply(False, "", model, str(exc))
+
+    def embed(self, texts: list[str], model: str) -> tuple[bool, list[list[float]]]:
+        """Vectoriza textos con un modelo de embeddings local (loopback)."""
+        if not texts or not model.strip():
+            return False, []
+        body = json.dumps({"model": model, "input": texts}).encode()
+        request = urllib.request.Request(
+            self.endpoint + "/api/embed", data=body,
+            headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                data = json.load(response)
+            vectors = data.get("embeddings")
+            if not isinstance(vectors, list) or not all(
+                    isinstance(item, list) for item in vectors):
+                return False, []
+            return True, [[float(value) for value in item] for item in vectors]
+        except (OSError, ValueError, urllib.error.URLError, TypeError):
+            return False, []

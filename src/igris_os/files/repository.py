@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from igris_os.retrieval import SemanticRetriever
 from igris_os.tools import safe_output
 
 EXCLUDED = {".git", ".venv", "venv", "node_modules", "build", "dist",
@@ -124,16 +125,19 @@ class RepositoryAnalyzer:
 
     @staticmethod
     def _search(records: list[dict], query: str) -> list[dict]:
-        ignored = {"este", "esta", "analiza", "proyecto", "repositorio"}
-        terms = {word for word in re.findall(r"\w{3,}", query.casefold())
-                 if word not in ignored}
+        documents = [{
+            "path": item["path"],
+            "text": (item["path"] + " " + " ".join(item["symbols"]) +
+                     " " + item["text"]).casefold(),
+        } for item in records]
+        matched = {item.path: item
+                   for item in SemanticRetriever().retrieve(query, documents)}
         scored = []
         for item in records:
-            text = (item["path"] + " " + " ".join(item["symbols"]) +
-                    " " + item["text"]).casefold()
-            score = sum(text.count(term) for term in terms)
-            if score:
-                scored.append({"path": item["path"], "score": score,
+            match = matched.get(item["path"])
+            if match:
+                scored.append({"path": item["path"], "score": match.score,
+                               "lexical": match.lexical,
                                "language": item["language"],
                                "excerpt": item["text"][:600]})
         return sorted(scored,

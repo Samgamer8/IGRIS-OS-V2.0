@@ -29,6 +29,7 @@ Primera base ejecutable:
 - adjuntos conectados a análisis, imagen, vídeo y audio;
 - pipeline multimedia con previsualización, evidencia y rollback confinado;
 - mapa profundo de repositorios con lenguajes, símbolos, dependencias y pruebas;
+- recuperación semántica local (n-gramas hasheados y embeddings Ollama opcionales);
 - copias aisladas de repositorios y propuestas verificadas con diff y rollback;
 - cola persistente de misiones y memoria técnica verificada;
 - progreso monotónico y cancelación cooperativa en puntos seguros;
