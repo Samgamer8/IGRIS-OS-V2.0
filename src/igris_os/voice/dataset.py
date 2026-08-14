@@ -125,9 +125,13 @@ class VoiceDatasetRecorder:
 
     def _clean(self, raw: Path, output: Path) -> None:
         filters = (
-            "highpass=f=80,lowpass=f=8000,"
-            "afftdn=nr=10:nf=-45:tn=1,"
-            "loudnorm=I=-20:TP=-2:LRA=7")
+            "highpass=f=90,lowpass=f=7800,"
+            "afftdn=nr=24:nf=-40:tn=1:gs=10,"
+            "silenceremove=start_periods=1:start_duration=0.15:"
+            "start_threshold=-46dB:stop_periods=-1:stop_duration=0.45:"
+            "stop_threshold=-46dB,"
+            "loudnorm=I=-18:TP=-2:LRA=7,"
+            "agate=threshold=0.006:ratio=2:attack=15:release=220")
         run = subprocess.run([
             self.ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
             "-i", str(raw), "-af", filters, "-ar", "24000", "-ac", "1",
