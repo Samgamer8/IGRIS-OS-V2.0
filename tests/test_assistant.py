@@ -34,3 +34,28 @@ def test_assistant_includes_verified_context():
         "continua", ("user: crea una calculadora", "igris: proyecto listo"))
     assert "CONTEXTO LOCAL VERIFICADO" in client.prompt
     assert "proyecto listo" in client.prompt
+
+
+def test_run_command_rejects_unlisted_tool():
+    assistant = AssistantService(FakeClient())
+    out = assistant._tool_run_command("format C:")
+    assert "Herramienta no permitida" in out
+
+
+def test_run_command_rejects_shell_operators():
+    assistant = AssistantService(FakeClient())
+    out = assistant._tool_run_command("git status | more")
+    assert "Operadores de shell no permitidos" in out
+
+
+def test_run_command_runs_allowed_tool_without_shell():
+    assistant = AssistantService(FakeClient())
+    out = assistant._tool_run_command("git --version")
+    assert "git version" in out
+
+
+def test_system_info_runs_without_shell():
+    assistant = AssistantService(FakeClient())
+    out = assistant._tool_system_info("")
+    assert out
+    assert "sistema operativo" in out.lower() or "os" in out.lower()

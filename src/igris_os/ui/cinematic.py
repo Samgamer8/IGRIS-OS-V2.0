@@ -399,8 +399,11 @@ def run_cinematic_panel():
                 if answer != QMessageBox.StandardButton.Yes:
                     self.finish_message("Operación cancelada.", False)
                     return
+                payload = dict(action.payload or {})
+                payload["__approval"] = self.kernel.issue_approval(
+                    objective, action.capability)
                 job = self.mission_queue.enqueue(
-                    objective, "capability", action.capability, action.payload)
+                    objective, "capability", action.capability, payload)
             else:
                 job = self.mission_queue.enqueue(objective, "chat")
             pending = self.mission_queue.summary()["pending"]
@@ -429,7 +432,8 @@ def run_cinematic_panel():
             if job.kind == "capability":
                 reply = self.kernel.execute(
                     Mission(job.objective), job.capability, job.payload,
-                    confirmed=True, on_progress=report_progress)
+                    approval=job.payload.get("__approval"),
+                    on_progress=report_progress)
                 self.remember_repository_context(reply, job)
             else:
                 context = self.memory_context() + self.semantic_context(job.objective)

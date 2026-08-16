@@ -3,7 +3,7 @@ import json
 import sys
 from pathlib import Path
 
-from igris_os.application import MissionDirector
+from igris_os.application import MissionDirector, RuntimeProbe
 from igris_os.bootstrap import build_igris
 from igris_os.domain import Mission
 from igris_os.models import default_providers
@@ -18,7 +18,8 @@ def _report_progress(percent: int, message: str) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="igris", description="IGRIS OS V2.O")
     parser.add_argument("command", choices=("health", "capabilities", "plan",
-                                            "providers", "inventory", "panel"))
+                                            "providers", "inventory", "panel",
+                                            "probe"))
     parser.add_argument("value", nargs="?")
     parser.add_argument("--source", action="append", default=[])
     parser.add_argument("--output", default="runtime/inventory/sources.json")
@@ -27,6 +28,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "panel":
         from igris_os.ui import run_panel
         return run_panel()
+    if args.command == "probe":
+        probe = RuntimeProbe(Path.cwd())
+        statuses = probe.probe()
+        print(json.dumps({
+            name: {"state": status.state, "path": status.path}
+            for name, status in statuses.items()
+        }, ensure_ascii=False, indent=2))
+        return 0
     if args.command == "plan":
         if not args.value:
             parser.error("plan necesita un objetivo")

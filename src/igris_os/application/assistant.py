@@ -1,4 +1,5 @@
 import re
+import shlex
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -169,12 +170,27 @@ class AssistantService:
         return result.stdout.strip() or "no changes"
 
     def _tool_system_info(self, args: str) -> str:
-        result = subprocess.run(["systeminfo"], capture_output=True, text=True, timeout=30, shell=True)
+        result = subprocess.run(["systeminfo"], capture_output=True, text=True, timeout=30)
         output = result.stdout.strip() or result.stderr.strip()
         return output[:2000] if output else "sin datos"
 
+    _ALLOWED_TOOLS = frozenset({
+        "git", "ffmpeg", "ffprobe", "python", "py", "where",
+    })
+
     def _tool_run_command(self, args: str) -> str:
-        result = subprocess.run(args, capture_output=True, text=True, shell=True, timeout=60)
+        try:
+            parts = shlex.split(args, posix=False)
+        except ValueError:
+            return "[ERROR] Comando mal formado"
+        if not parts:
+            return "[ERROR] Comando vacio"
+        if parts[0].lower() not in self._ALLOWED_TOOLS:
+            return (f"[ERROR] Herramienta no permitida: {parts[0]}. "
+                    f"Permitidas: {', '.join(sorted(self._ALLOWED_TOOLS))}")
+        if any(part in {"&", "|", ">", "<", ";", "&&", "||"} for part in parts):
+            return "[ERROR] Operadores de shell no permitidos"
+        result = subprocess.run(parts, capture_output=True, text=True, timeout=60)
         out = result.stdout.strip()
         err = result.stderr.strip()
         if out and err:

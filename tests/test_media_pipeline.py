@@ -3,9 +3,16 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from igris_os.multimedia import MediaEngine, MediaPipeline, MediaResult
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"}
+
+_HAS_FFMPEG = shutil.which("ffmpeg") is not None
+
+requires_ffmpeg = pytest.mark.skipif(
+    not _HAS_FFMPEG, reason="ffmpeg no esta en PATH")
 
 
 def _write_valid_media(target: Path) -> None:
@@ -55,6 +62,7 @@ class FakeEngine:
         return self._result("trim", output)
 
 
+@requires_ffmpeg
 def test_pipeline_delivers_outputs_and_evidence(tmp_path):
     source = tmp_path / "source.mp4"
     source.write_bytes(b"video")
@@ -70,6 +78,7 @@ def test_pipeline_delivers_outputs_and_evidence(tmp_path):
     assert len(report["steps"]) == 2
 
 
+@requires_ffmpeg
 def test_pipeline_rolls_back_outputs_when_later_step_fails(tmp_path):
     source = tmp_path / "source.mp4"
     source.write_bytes(b"video")
@@ -106,6 +115,7 @@ def test_trim_validates_interval_without_running_ffmpeg(tmp_path):
     assert not result.ok
 
 
+@requires_ffmpeg
 def test_pipeline_reports_granular_progress(tmp_path):
     source = tmp_path / "source.mp4"
     source.write_bytes(b"video")
