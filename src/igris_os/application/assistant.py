@@ -1,14 +1,14 @@
 import re
 import shlex
-import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from igris_os.ai import ModelRouter, OllamaClient
 from igris_os.application.director import MissionDirector
 from igris_os.domain import Mission, MissionBranch
 from igris_os.memory.compressor import ContextCompressor
+from igris_os.security.sandbox import JobObjectSandbox, SandboxRun
 
 
 SYSTEM = """Eres IGRIS OS V2.O. No eres un chatbot generico: eres el operador local del sistema.
@@ -99,6 +99,8 @@ class AssistantService:
         self.director = MissionDirector()
         self.router = ModelRouter(self.client)
         self.compressor = ContextCompressor()
+        self.sandbox = JobObjectSandbox(memory_limit_mb=512, cpu_seconds=60,
+                                        max_processes=4)
         self._tools: Dict[str, Callable[..., str]] = {
             "list_files": self._tool_list_files,
             "git_status": self._tool_git_status,
@@ -159,18 +161,31 @@ class AssistantService:
         lines = [f"{'DIR ' if p.is_dir() else 'FILE'} {p.name}" for p in entries]
         return "\n".join(lines[:100])
 
+    def _run_sandboxed(self, command: Sequence[str], cwd: Optional[str] = None,
+                       timeout_seconds: Optional[int] = None) -> SandboxRun:
+        return self.sandbox.run(list(command), cwd=cwd,
+                                timeout=timeout_seconds or 60)
+
     def _tool_git_status(self, args: str) -> str:
         cwd = args.strip() or "."
-        result = subprocess.run(["git", "status", "--short"], capture_output=True, text=True, cwd=cwd, timeout=30)
+        result = self._run_sandboxed(["git", "status", "--short"], cwd=cwd,
+                                     timeout_seconds=30)
+        if result.timed_out:
+            return "[TIMEOUT] git status excedio el limite"
         return result.stdout.strip() or "working tree clean"
 
     def _tool_git_diff(self, args: str) -> str:
         cwd = args.strip() or "."
-        result = subprocess.run(["git", "diff", "--stat"], capture_output=True, text=True, cwd=cwd, timeout=30)
+        result = self._run_sandboxed(["git", "diff", "--stat"], cwd=cwd,
+                                     timeout_seconds=30)
+        if result.timed_out:
+            return "[TIMEOUT] git diff excedio el limite"
         return result.stdout.strip() or "no changes"
 
     def _tool_system_info(self, args: str) -> str:
-        result = subprocess.run(["systeminfo"], capture_output=True, text=True, timeout=30)
+        result = self._run_sandboxed(["systeminfo"], timeout_seconds=30)
+        if result.timed_out:
+            return "[TIMEOUT] systeminfo excedio el limite"
         output = result.stdout.strip() or result.stderr.strip()
         return output[:2000] if output else "sin datos"
 
@@ -190,7 +205,9 @@ class AssistantService:
                     f"Permitidas: {', '.join(sorted(self._ALLOWED_TOOLS))}")
         if any(part in {"&", "|", ">", "<", ";", "&&", "||"} for part in parts):
             return "[ERROR] Operadores de shell no permitidos"
-        result = subprocess.run(parts, capture_output=True, text=True, timeout=60)
+        result = self._run_sandboxed(parts)
+        if result.timed_out:
+            return "[TIMEOUT] El comando excedio el limite y fue terminado"
         out = result.stdout.strip()
         err = result.stderr.strip()
         if out and err:
