@@ -2,8 +2,11 @@ from igris_os.application import CapabilityRegistry, LLMMissionDirector
 from igris_os.domain import ActionRisk, CapabilitySpec, ExecutionResult, Mission
 from igris_os.tools import ToolCatalog
 
+from igris_os.capabilities.k3_engine import register_k3_capabilities
+
 
 def register_core_capabilities(registry: CapabilityRegistry) -> None:
+    register_k3_capabilities(registry)
     registry.register(
         CapabilitySpec("mission.plan", "Plan verificable de una mision",
                        ActionRisk.READ_ONLY),
