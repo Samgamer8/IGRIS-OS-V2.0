@@ -1,8 +1,7 @@
 import json
-import shutil
-import subprocess
 from pathlib import Path
 
+from igris_os.games.runtime import GodotRuntime
 from igris_os.tools import safe_output
 
 
@@ -31,17 +30,33 @@ SCRIPT = """extends Node2D
 
 var player := Vector2(480, 270)
 var speed := 260.0
+var _frames := 0
+var _capture_path := ""
 
 func _ready():
+    _capture_path = _capture_arg()
     queue_redraw()
     print("IGRIS_GAME_READY")
 
+func _capture_arg() -> String:
+    for arg in OS.get_cmdline_user_args():
+        var prefix := "--igris-capture="
+        if arg.begins_with(prefix):
+            return arg.substr(prefix.length())
+    return ""
+
 func _process(delta):
+    _frames += 1
     var direction := Input.get_vector("ui_left", "ui_right", "ui_up", "ui_down")
     player += direction * speed * delta
     player.x = clamp(player.x, 24.0, 936.0)
     player.y = clamp(player.y, 24.0, 516.0)
     queue_redraw()
+    if _capture_path != "" and _frames == 5:
+        var image := get_viewport().get_texture().get_image()
+        image.save_png(_capture_path)
+        print("IGRIS_CAPTURE_SAVED")
+        get_tree().quit()
 
 func _draw():
     draw_rect(Rect2(0, 0, 960, 540), Color("10131d"))
@@ -85,25 +100,22 @@ class GodotProjectFactory:
         (root / "project.godot").write_text(
             PROJECT.format(name=safe_name), encoding="utf-8")
         (root / "main.tscn").write_text(SCENE, encoding="utf-8")
+        body = SCRIPT.removeprefix("extends Node2D\n")
         (root / "main.gd").write_text(
-            GENRE_CODE[normalized_genre] + SCRIPT, encoding="utf-8")
+            "extends Node2D\n" + GENRE_CODE[normalized_genre] + body,
+            encoding="utf-8")
         report = {"files_present": all(
                       (root / item).is_file()
                       for item in ("project.godot", "main.tscn", "main.gd")),
                   "genre": normalized_genre,
                   "godot_checked": False, "godot_ok": None}
-        executable = shutil.which("godot") or shutil.which("godot4")
-        if executable:
-            try:
-                run = subprocess.run(
-                    [executable, "--headless", "--path", str(root),
-                     "--editor", "--quit"], capture_output=True, text=True,
-                    timeout=30)
-                report.update(godot_checked=True, godot_ok=run.returncode == 0,
-                              diagnostic=(run.stdout + run.stderr)[-1200:])
-            except subprocess.TimeoutExpired:
-                report.update(godot_checked=True, godot_ok=False,
-                              diagnostic="Godot agoto el tiempo")
+        runtime = GodotRuntime()
+        if runtime.available:
+            version = runtime.version()
+            report.update(godot_checked=True, godot_version=version)
+            imported = runtime.import_project(root)
+            report.update(godot_ok=imported.ok,
+                          diagnostic=imported.output[-1200:])
         (root / "VERIFICATION.json").write_text(
             json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         return root

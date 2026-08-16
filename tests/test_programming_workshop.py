@@ -42,3 +42,29 @@ def test_destructive_attribute_calls_are_blocked(tmp_path):
         "import unittest\n")
     assert not result.ok
     assert "sistema" in result.message
+
+
+def test_lint_flags_undefined_name(tmp_path):
+    report = PythonWorkshop(tmp_path).lint(
+        "def f():\n    return no_existe\n")
+    assert not report.ok
+    assert any(issue.code == "E0602" for issue in report.issues)
+
+
+def test_lint_accepts_clean_code(tmp_path):
+    assert PythonWorkshop(tmp_path).lint(
+        "def add(a, b):\n    return a + b\n").ok
+
+
+def test_dependencies_classify_stdlib_vs_third_party(tmp_path):
+    deps = PythonWorkshop(tmp_path).dependencies(
+        "import os\nimport numpy as np\n")
+    assert "os" in deps.stdlib
+    assert "numpy" in deps.third_party
+
+
+def test_verify_blocks_undefined_name(tmp_path):
+    result = PythonWorkshop(tmp_path).verify(
+        "def f():\n    return no_existe\n", "import unittest\n")
+    assert not result.ok
+    assert "Lint" in result.message

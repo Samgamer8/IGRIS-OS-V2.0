@@ -8,6 +8,8 @@ def test_plan_capability(tmp_path):
         {"objective": "construye un programa Python"})
     assert result.ok
     assert result.data["branch"] == "programming"
+    assert "deliverables" in result.data
+    assert "acceptance_criteria" in result.data
 
 
 def test_tool_discovery_capability(tmp_path):

@@ -40,19 +40,19 @@ def test_multiple_attachments_route_to_read_only_inspection():
 
 def test_javascript_creation_routes_to_multilang_developer():
     action = MissionRouter().route("crea un programa JavaScript de tareas")
-    assert action.capability == "programming.multilang.develop"
+    assert action.capability == "programming.autonomous.develop"
     assert action.payload["language"] == "javascript"
 
 
 def test_go_creation_routes_to_multilang_developer():
     action = MissionRouter().route("crea un programa Go de tareas")
-    assert action.capability == "programming.multilang.develop"
+    assert action.capability == "programming.autonomous.develop"
     assert action.payload["language"] == "go"
 
 
 def test_typescript_creation_routes_to_multilang_developer():
     action = MissionRouter().route("crea un programa TypeScript de tareas")
-    assert action.capability == "programming.multilang.develop"
+    assert action.capability == "programming.autonomous.develop"
     assert action.payload["language"] == "typescript"
 
 
@@ -114,3 +114,31 @@ def test_selects_platformer_genre():
         "crea un videojuego de plataformas en Godot")
     assert action.capability == "games.godot.scaffold"
     assert action.payload["genre"] == "platformer"
+
+
+def test_game_test_routes_to_playtest():
+    action = MissionRouter().route("prueba el juego")
+    assert action.capability == "games.godot.playtest"
+    assert action.requires_confirmation
+
+
+def test_game_export_routes_to_export():
+    action = MissionRouter().route("exporta el juego a ejecutable")
+    assert action.capability == "games.godot.export"
+    assert action.requires_confirmation
+
+
+def test_voice_question_routes_to_chat_not_voice():
+    action = MissionRouter().route("busco la voz de Jarvis en espanol")
+    assert action.kind == "chat"
+
+
+def test_listening_question_routes_to_chat_not_voice():
+    action = MissionRouter().route(
+        "tienes muestras de esa voz para que las escuche")
+    assert action.kind == "chat"
+
+
+def test_explicit_voice_command_routes_to_voice():
+    action = MissionRouter().route("di algo")
+    assert action.capability == "voice.set"

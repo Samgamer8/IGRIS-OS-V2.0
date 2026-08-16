@@ -105,17 +105,6 @@ class MissionQueue:
             self._save()
             return True
 
-    def cancel_at_safe_point(self, job_id: str) -> bool:
-        with self._lock:
-            job = self._get(job_id)
-            if job.state != "running" or not job.cancellation_requested:
-                return False
-            job.state = "cancelled"
-            job.progress = 100
-            job.message = "Cancelada en punto seguro"
-            self._save()
-            return True
-
     def cancel_pending(self) -> int:
         count = 0
         with self._lock:
@@ -127,6 +116,10 @@ class MissionQueue:
                     count += 1
             self._save()
         return count
+
+    def recent(self, limit: int = 10) -> list[QueuedMission]:
+        with self._lock:
+            return list(self._jobs[-limit:])
 
     def summary(self) -> dict[str, int]:
         result = {state: 0 for state in (

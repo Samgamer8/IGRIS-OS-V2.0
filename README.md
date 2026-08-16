@@ -38,6 +38,23 @@ Primera base ejecutable:
 - proyectos Godot top-down, arcade y plataformas;
 - evolución medida en cuarentena, sin autopromoción a producción;
 - plantilla Godot 2D jugable con verificación;
+- playtest Godot automático (arranque headless + captura + comparación con
+  referencia) con Godot portable en `.tools/godot/` (ignorado por Git);
+- exportación a ejecutable Windows verificada (cabecera PE + lanzamiento real)
+  usando plantillas oficiales instaladas en `%APPDATA%/Godot/export_templates`;
+- enrutado de modelos por dificultad, tarea y presupuesto de tokens
+  (local prioritario, con modos ahorro/calidad);
+- verificador independiente: un segundo modelo aprueba o rechaza cada entrega
+  con puntuación y umbral (el generador no se aprueba a sí mismo);
+- sandbox de ejecución con Job Objects de Windows: límites de memoria/CPU y
+  cierre forzado de procesos hijos (más allá de la lista negra de comandos);
+- toolchain portátil en `.tools/`: Rust, C++ (GCC 16) y Java instalados sin
+  tocar el sistema; taller Python con lint y análisis de dependencias;
+- galaxia operativa con nodos reales (capacidades) y estado pendiente/ok/error;
+- panel operativo: permisos pendientes con aprobar/rechazar, plan editable,
+  entregables verificados y deshacer seguro del workspace;
+- verificación visual automática de imágenes, vídeo y capturas de interfaz
+  (detección de ventanas en negro, sin contraste o con bordes uniformes);
 - esquema de continuidad en `docs/SESSION_CONTINUITY.md`.
 
 ## Uso de desarrollo

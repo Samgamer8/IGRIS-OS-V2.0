@@ -381,9 +381,10 @@ def run_cinematic_panel():
             self.memory.remember(
                 "chat", {"role": "user", "text": objective}, verified=True)
             plan = self.director.plan(Mission(objective))
+            preview = plan.deliverables[:3] if plan.deliverables else (plan.objective,)
             self.plan_label.setText(
                 "MISIÓN: " + plan.branch.value.upper() + "\n" +
-                " → ".join(plan.steps[:3]))
+                " → ".join(preview))
             self.plan_label.show()
             self.status.setText("● Estado: Procesando")
             self.status.setStyleSheet("color:#ffbe55;background:transparent;")

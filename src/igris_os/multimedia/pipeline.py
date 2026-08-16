@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Callable
 
 from igris_os.multimedia.engine import MediaEngine, MediaResult
+from igris_os.multimedia.visual import VisualVerifier
 from igris_os.tools import safe_output
 
 
@@ -21,6 +22,7 @@ class MediaPipeline:
                  engine_factory: Callable[[Path], MediaEngine] = MediaEngine) -> None:
         self.workspace = workspace.resolve()
         self.engine = engine_factory(self.workspace)
+        self.verifier = VisualVerifier()
 
     def execute(self, source: Path, operations: list[dict], *,
                 confirmed: bool = False,
@@ -51,6 +53,13 @@ class MediaPipeline:
                 return self._failure(result.message, evidence, created)
             if target.is_file():
                 created.append(target)
+                check = self.verifier.verify(target)
+                evidence[-1]["verified"] = check.ok
+                evidence[-1]["verification"] = check.message
+                if not check.ok:
+                    return self._failure(
+                        f"Salida no verificable: {check.message}", evidence,
+                        created)
         if on_progress:
             on_progress(98, "Generando informe")
         report = self._report(True, evidence, False)

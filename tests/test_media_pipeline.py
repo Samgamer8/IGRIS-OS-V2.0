@@ -1,7 +1,32 @@
 import json
+import shutil
+import subprocess
 from pathlib import Path
 
 from igris_os.multimedia import MediaEngine, MediaPipeline, MediaResult
+
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"}
+
+
+def _write_valid_media(target: Path) -> None:
+    """Escribe un archivo multimedia real para que la verificacion del pipeline
+    pueda validarlo (el FakeEngine no debe producir basura)."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.suffix.casefold() in IMAGE_SUFFIXES:
+        from PIL import Image
+        image = Image.new("RGB", (40, 30), (20, 20, 20))
+        px = image.load()
+        for x in range(40):
+            for y in range(30):
+                if (x + y) % 4 == 0:
+                    px[x, y] = (210, 210, 210)
+        image.save(target)
+        return
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi",
+         "-i", "testsrc=size=64x64:duration=0.5",
+         "-pix_fmt", "yuv420p", str(target)],
+        capture_output=True, check=True)
 
 
 class FakeEngine:
@@ -14,8 +39,7 @@ class FakeEngine:
         if kind == self.fail_kind:
             return MediaResult(False, "fallo simulado")
         target = self.workspace / output
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(b"ok")
+        _write_valid_media(target)
         return MediaResult(True, "ok", str(target))
 
     def thumbnail(self, source, output, second=0, confirmed=False):

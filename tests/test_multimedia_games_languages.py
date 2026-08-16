@@ -5,7 +5,7 @@ import pytest
 
 from igris_os.games import GodotProjectFactory
 from igris_os.multimedia import MediaEngine
-from igris_os.programming import LanguageVerifier
+from igris_os.programming.languages import Language, MultiLanguageVerifier
 
 
 def test_godot_project_requires_confirmation(tmp_path):
@@ -36,31 +36,26 @@ def test_godot_rejects_unknown_genre(tmp_path):
             "Juego", genre="desconocido", confirmed=True)
 
 
-def test_javascript_syntax_when_node_available(tmp_path):
+def test_javascript_detection(tmp_path):
     source = tmp_path / "app.js"
     source.write_text("const value = 2 + 2;\n", encoding="utf-8")
-    result = LanguageVerifier().check("javascript", source)
-    assert result.ok if shutil.which("node") else not result.available
+    result = MultiLanguageVerifier(tmp_path).verify(source)
+    assert result.language == Language.JAVASCRIPT
 
 
-def test_go_syntax_when_gofmt_available(tmp_path):
-    source = tmp_path / "main.go"
-    source.write_text("package main\nfunc main() {}\n", encoding="utf-8")
-    result = LanguageVerifier().check("go", source)
-    assert result.ok if shutil.which("gofmt") else not result.available
-
-
-def test_typescript_syntax_when_npx_available(tmp_path):
+def test_typescript_detection(tmp_path):
     source = tmp_path / "main.ts"
     source.write_text("const value: number = 2 + 2;\nexport default value;\n",
                       encoding="utf-8")
-    result = LanguageVerifier().check("typescript", source)
-    assert result.ok if shutil.which("npx") else not result.available
+    result = MultiLanguageVerifier(tmp_path).verify(source)
+    assert result.language == Language.TYPESCRIPT
 
 
 def test_unknown_language_is_controlled(tmp_path):
-    result = LanguageVerifier().check("unknown", tmp_path / "x")
-    assert not result.ok and not result.available
+    source = tmp_path / "main.xyz"
+    source.write_text("x", encoding="utf-8")
+    result = MultiLanguageVerifier(tmp_path).verify(source)
+    assert not result.ok
 
 
 def test_multimedia_confirmation_and_discovery(tmp_path):

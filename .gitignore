@@ -14,3 +14,10 @@ panel_smoke.png
 portable_final.png
 *_smoke.png
 *.spec
+.tools/
+generated/
+.freebuff/
+archive_debug/
+*.db
+*.db-wal
+*.db-shm

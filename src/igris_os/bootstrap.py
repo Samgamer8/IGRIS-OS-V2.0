@@ -3,7 +3,7 @@ from pathlib import Path
 from igris_os.application import CapabilityRegistry, IgrisKernel
 from igris_os.capabilities import (
     register_core_capabilities, register_creation_capabilities,
-    register_system_health,
+    register_git_capabilities, register_voice_capabilities, register_system_health,
 )
 from igris_os.security import PermissionPolicy
 from igris_os.storage.audit import AuditLog
@@ -16,6 +16,8 @@ def build_igris(runtime: Path | None = None) -> IgrisKernel:
     register_system_health(registry)
     register_core_capabilities(registry)
     register_creation_capabilities(registry)
+    register_git_capabilities(registry)
+    register_voice_capabilities(registry)
     return IgrisKernel(
         registry,
         PermissionPolicy(),

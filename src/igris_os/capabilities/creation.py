@@ -5,11 +5,14 @@ from pathlib import Path
 from igris_os.ai import OllamaClient
 from igris_os.application import CapabilityRegistry, SpecialistCoordinator
 from igris_os.domain import ActionRisk, CapabilitySpec, ExecutionResult
-from igris_os.games import GodotProjectFactory
+from igris_os.evaluation import IndependentVerifier
+from igris_os.games import GodotExporter, GodotProjectFactory, GameVerifier
 from igris_os.files import RepositoryAnalyzer, RepositoryStager
-from igris_os.multimedia import ImageEngine, MediaEngine, MediaPipeline
+from igris_os.multimedia import (ImageEngine, MediaEngine, MediaPipeline,
+                                 VisualVerifier)
 from igris_os.programming import (
-    LanguageVerifier, MultiLanguageDeveloper, PythonProjectDeveloper,
+    AutonomousProgrammingCoordinator, MultiLanguageCoordinator,
+    MultiLanguageVerifier, PythonProjectDeveloper,
     RepositoryDeveloper,
 )
 
@@ -23,6 +26,10 @@ def register_creation_capabilities(registry: CapabilityRegistry) -> None:
                        "Genera, prueba y entrega un proyecto Python",
                        ActionRisk.WRITE_WORKSPACE, True), _develop_python)
     registry.register(
+        CapabilitySpec("programming.autonomous.develop",
+                       "Desarrollo autonomo con arquitecto, programador y revisor",
+                       ActionRisk.WRITE_WORKSPACE, True), _develop_autonomous)
+    registry.register(
         CapabilitySpec("programming.multilang.develop",
                        "Genera y verifica un proyecto en varios lenguajes",
                        ActionRisk.WRITE_WORKSPACE, True), _develop_multilang)
@@ -31,9 +38,21 @@ def register_creation_capabilities(registry: CapabilityRegistry) -> None:
                        "Crea una base de proyecto Godot",
                        ActionRisk.WRITE_WORKSPACE, True), _godot)
     registry.register(
+        CapabilitySpec("games.godot.playtest",
+                       "Arranca un juego Godot y verifica que renderiza",
+                       ActionRisk.WRITE_WORKSPACE, True), _godot_playtest)
+    registry.register(
+        CapabilitySpec("games.godot.export",
+                       "Exporta un proyecto Godot a ejecutable Windows",
+                       ActionRisk.WRITE_WORKSPACE, True), _godot_export)
+    registry.register(
         CapabilitySpec("multimedia.status",
                        "Comprueba FFmpeg y FFprobe",
                        ActionRisk.READ_ONLY), _media_status)
+    registry.register(
+        CapabilitySpec("multimedia.verify",
+                       "Verifica visualmente una imagen o video",
+                       ActionRisk.READ_ONLY), _verify_media)
     registry.register(
         CapabilitySpec("files.inspect", "Inspecciona archivos adjuntos",
                        ActionRisk.READ_ONLY), _inspect_files)
@@ -53,6 +72,10 @@ def register_creation_capabilities(registry: CapabilityRegistry) -> None:
         CapabilitySpec("mission.coordinate",
                        "Coordina especialistas con revision cruzada",
                        ActionRisk.WRITE_WORKSPACE, True), _coordinate)
+    registry.register(
+        CapabilitySpec("delivery.verify",
+                       "Revision independiente de una entrega con segundo modelo",
+                       ActionRisk.READ_ONLY), _verify_delivery)
     for name, description, handler in (
         ("image.resize", "Redimensiona una imagen", _resize_image),
         ("multimedia.extract_audio", "Extrae audio de un archivo", _extract_audio),
@@ -66,11 +89,13 @@ def register_creation_capabilities(registry: CapabilityRegistry) -> None:
 
 
 def _languages(_):
-    verifier = LanguageVerifier()
+    verifier = MultiLanguageVerifier(Path("/"))
     return ExecutionResult.success(
         "Lenguajes registrados",
-        languages=[{"name": profile.name, "extensions": profile.extensions}
-                   for profile in verifier.profiles()])
+        languages=[{"name": profile.language.value,
+                    "extensions": profile.extensions,
+                    "available": True}
+                   for profile in verifier.PROFILES.values()])
 
 
 def _develop_python(payload):
@@ -83,23 +108,85 @@ def _develop_python(payload):
             on_progress=payload.get("on_progress"))
     if not result.ok:
         return ExecutionResult.failure(result.message, "DEVELOPMENT_FAILED")
-    return ExecutionResult.success(result.message, project=result.project,
-                                   attempts=result.attempts)
+    readme = Path(result.project) / "README.md"
+    deliverable = (readme.read_text(encoding="utf-8")
+                   if readme.is_file() else result.message)
+    verdict = IndependentVerifier(client).verify(
+        deliverable, objective,
+        acceptance=("codigo ejecutable sin efectos destructivos",
+                    "pruebas que pasan", "uso documentado"),
+        generator_model=model)
+    if verdict.skipped:
+        return ExecutionResult.success(
+            result.message, project=result.project,
+            attempts=result.attempts, independent_review="omitted")
+    if not verdict.approved:
+        return ExecutionResult(
+            ok=False, code="INDEPENDENT_VERIFICATION_FAILED",
+            message=(f"Verificador independiente rechazo la entrega "
+                     f"({verdict.score:.0f}/100): {verdict.reason}"),
+            data={"project": result.project, "score": verdict.score,
+                  "verifier_model": verdict.verifier_model})
+    return ExecutionResult.success(
+        result.message, project=result.project, attempts=result.attempts,
+        independent_score=verdict.score,
+        verifier_model=verdict.verifier_model)
+
+
+def _develop_autonomous(payload):
+    objective = str(payload.get("objective", "")).strip()
+    language = str(payload.get("language", "python")).strip()
+    model = str(payload.get("model", "qwen2.5-coder:7b"))
+    client = OllamaClient(timeout=float(payload.get("timeout", 120)))
+    coordinator = AutonomousProgrammingCoordinator(
+        client, Path(payload["workspace"]), default_model=model)
+    result = coordinator.execute(
+        objective, confirmed=True,
+        on_progress=payload.get("on_progress"))
+    if not result.ok:
+        return ExecutionResult.failure(result.message, "AUTONOMOUS_FAILED")
+    return ExecutionResult.success(
+        result.message,
+        plan=result.plan.plan if result.plan else "",
+        deliverables=result.plan.modules if result.plan else (),
+        acceptance_criteria=result.plan.acceptance if result.plan else (),
+        review_score=result.review.score if result.review else 0.0,
+        attempts=result.attempts,
+    )
+
+
+def _verify_delivery(payload):
+    acceptance = payload.get("acceptance", ())
+    if not isinstance(acceptance, (list, tuple)):
+        acceptance = ()
+    verdict = IndependentVerifier(
+        OllamaClient(timeout=float(payload.get("timeout", 180)))).verify(
+            str(payload.get("deliverable", "")),
+            str(payload.get("objective", "")).strip(),
+            tuple(str(item) for item in acceptance),
+            str(payload.get("generator_model", "")))
+    return ExecutionResult.success(
+        "Revision independiente completada",
+        approved=verdict.approved,
+        score=round(verdict.score, 1),
+        reason=verdict.reason,
+        generator_model=verdict.generator_model,
+        verifier_model=verdict.verifier_model,
+        skipped=verdict.skipped)
 
 
 def _develop_multilang(payload):
     objective = str(payload.get("objective", "")).strip()
     language = str(payload.get("language", "")).strip()
     model = str(payload.get("model", "qwen2.5-coder:7b"))
-    client = OllamaClient(timeout=float(payload.get("timeout", 180)))
-    result = MultiLanguageDeveloper(
-        client, Path(payload["workspace"]), model).develop(
-            objective, language, confirmed=True,
+    client = OllamaClient(timeout=float(payload.get("timeout", 120)))
+    result = MultiLanguageCoordinator(
+        client, Path(payload["workspace"]), default_model=model).develop(
+            objective, language=language, confirmed=True,
             on_progress=payload.get("on_progress"))
     if not result.ok:
         return ExecutionResult.failure(result.message, "DEVELOPMENT_FAILED")
-    return ExecutionResult.success(result.message, project=result.project,
-                                   attempts=result.attempts, language=language)
+    return ExecutionResult.success(result.message, language=language)
 
 
 def _godot(payload):
@@ -109,10 +196,74 @@ def _godot(payload):
     return ExecutionResult.success("Proyecto Godot creado", project=str(project))
 
 
+def _godot_export(payload):
+    workspace = Path(payload["workspace"])
+    explicit = payload.get("project")
+    if explicit:
+        project = Path(str(explicit))
+    else:
+        candidates = sorted(workspace.glob("*/project.godot"))
+        project = candidates[0].parent if candidates else workspace
+    output = workspace / str(payload.get("output", "build/igris_game.exe"))
+    result = GodotExporter().export(project, output, confirmed=True)
+    if not result.ok:
+        return ExecutionResult(
+            ok=False, code="GAME_EXPORT_UNVERIFIED",
+            message=result.message + (" · " + result.verification if result.verification else ""),
+            data={"executable": result.executable, "size": result.size})
+    return ExecutionResult.success(
+        result.message, executable=result.executable, size=result.size,
+        verification=result.verification)
+
+
+def _godot_playtest(payload):
+    workspace = Path(payload["workspace"])
+    explicit = payload.get("project")
+    if explicit:
+        project = Path(str(explicit))
+    else:
+        candidates = sorted(workspace.glob("*/project.godot"))
+        project = candidates[0].parent if candidates else workspace
+    reference = payload.get("reference")
+    result = GameVerifier().playtest(
+        project, capture_dir=workspace,
+        reference=Path(str(reference)) if reference else None)
+    return ExecutionResult.success(
+        "Playtest completado",
+        verified=result.ok,
+        detail=result.message,
+        boot_ok=result.boot_ok,
+        visual_ok=result.visual_ok,
+        reference_ok=result.reference_ok,
+        similarity=round(result.similarity, 3),
+        capture=result.capture_path,
+        godot_version=result.version)
+
+
 def _media_status(payload):
     engine = MediaEngine(Path(payload["workspace"]))
     return ExecutionResult.success("Multimedia inspeccionada",
                                    available=engine.available)
+
+
+def _verify_media(payload):
+    source = payload.get("source")
+    if not source:
+        return ExecutionResult.failure(
+            "Falta el archivo a verificar", "VERIFY_MISSING_SOURCE")
+    check = VisualVerifier().verify(Path(str(source)))
+    return ExecutionResult.success(
+        "Verificacion visual completada",
+        verified=check.ok,
+        detail=check.message,
+        width=check.width,
+        height=check.height,
+        mean_brightness=round(check.mean_brightness, 2),
+        std_brightness=round(check.std_brightness, 2),
+        blank=check.blank,
+        uniform_borders=list(check.uniform_borders),
+        duration=check.duration,
+        codec=check.codec)
 
 
 def _inspect_files(payload):
@@ -246,6 +397,9 @@ def _transcode(payload):
     return _media_result(result)
 
 
+from igris_os.voice import WindowsVoice
+
+
 def _media_pipeline(payload):
     operations = payload.get("operations", [])
     if not isinstance(operations, list):
@@ -255,9 +409,9 @@ def _media_pipeline(payload):
         on_progress=payload.get("on_progress"))
     if not result.ok:
         return ExecutionResult(
-            False,
-            result.message + ("; rollback aplicado" if result.rolled_back else ""),
-            "MEDIA_PIPELINE_FAILED",
-            {"report": result.report, "rolled_back": result.rolled_back})
+            ok=False,
+            message=result.message + ("; rollback aplicado" if result.rolled_back else ""),
+            code="MEDIA_PIPELINE_FAILED",
+            data={"report": result.report, "rolled_back": result.rolled_back})
     return ExecutionResult.success(
         result.message, outputs=result.outputs, report=result.report)

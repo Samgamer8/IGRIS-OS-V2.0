@@ -32,7 +32,8 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("plan necesita un objetivo")
         plan = MissionDirector().plan(Mission(args.value))
         print(json.dumps({"mission_id": plan.mission_id, "branch": plan.branch.value,
-                          "steps": plan.steps, "acceptance": plan.acceptance,
+                          "deliverables": plan.deliverables,
+                          "acceptance_criteria": plan.acceptance_criteria,
                           "needs_clarification": plan.needs_clarification},
                          ensure_ascii=False, indent=2))
         return 0

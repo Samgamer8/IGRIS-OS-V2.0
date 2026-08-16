@@ -21,8 +21,14 @@ def main() -> int:
         if any(marker in text for marker in ("Ã", "Â", "â€¢", "â€”")):
             damaged.append(str(path.relative_to(ROOT)))
     state = json.loads((ROOT / "PROJECT_STATE.json").read_text(encoding="utf-8"))
-    if missing or damaged or state.get("canonical_folder") != "IGRIS OS V2.O":
-        print(json.dumps({"missing": missing, "encoding": damaged}, indent=2))
+    expected_folder = state.get("canonical_folder")
+    misplaced = bool(expected_folder) and ROOT.name != expected_folder
+    if missing or damaged or misplaced:
+        print(json.dumps(
+            {"missing": missing, "encoding": damaged,
+             "misplaced": misplaced, "expected_folder": expected_folder,
+             "actual_folder": ROOT.name},
+            indent=2))
         return 1
     print("RELEASE CHECK: APROBADO")
     return 0

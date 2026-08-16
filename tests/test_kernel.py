@@ -29,8 +29,10 @@ def test_handler_failure_does_not_escape(tmp_path):
 def test_write_requires_confirmation(tmp_path):
     kernel, registry = make_kernel(tmp_path)
     registry.register(CapabilitySpec("write", "escribe", ActionRisk.WRITE_WORKSPACE), lambda _: ExecutionResult.success("ok"))
-    denied = kernel.execute(Mission("prueba"), "write")
-    allowed = kernel.execute(Mission("prueba"), "write", confirmed=True)
+    mission = Mission("prueba")
+    denied = kernel.execute(mission, "write")
+    token = kernel.issue_approval(mission.objective, "write")
+    allowed = kernel.execute(mission, "write", approval=token)
     assert denied.code == "CONFIRMATION_REQUIRED"
     assert allowed.ok
 
@@ -44,6 +46,20 @@ def test_audit_recent_skips_corrupt_lines(tmp_path):
     events = audit.recent()
     assert len(events) == 1
     assert events[0]["capability"] == "health"
+
+
+def test_audit_redacts_secrets_in_message_and_stack(tmp_path):
+    audit = AuditLog(tmp_path / "audit.jsonl")
+    audit.record_execution(
+        "m1", "cap", ok=False, code="FAILED",
+        message="fallo con token=AKIAIOSFODNN7EXAMPLE y Bearer abcDEF123",
+        stack_trace="Traceback... password=supersecreto",
+    )
+    event = audit.recent()[0]
+    assert "AKIAIOSFODNN7EXAMPLE" not in event["message"]
+    assert "abcDEF123" not in event["message"]
+    assert "supersecreto" not in event["stack_trace"]
+    assert "***REDACTED***" in event["message"]
 
 
 def test_kernel_forwards_progress_callback_to_handler(tmp_path):

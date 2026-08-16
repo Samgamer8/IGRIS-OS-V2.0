@@ -1,3 +1,4 @@
+import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,8 +25,24 @@ class ToolCatalog:
     }
 
     def discover(self) -> tuple[ToolAdapter, ...]:
-        return tuple(ToolAdapter(name, shutil.which(name), domains)
+        return tuple(ToolAdapter(name, self._find(name), domains)
                      for name, domains in self.DEFINITIONS.items())
+
+    @staticmethod
+    def _find(name: str) -> str | None:
+        found = shutil.which(name)
+        if found:
+            return found
+        if name == "godot":
+            env = os.environ.get("IGRIS_GODOT")
+            if env and Path(env).is_file():
+                return env
+            bundled = Path(".tools", "godot")
+            if bundled.is_dir():
+                executables = sorted(bundled.glob("Godot_*_win64.exe"))
+                if executables:
+                    return str(executables[0])
+        return None
 
     def for_domain(self, domain: str) -> tuple[ToolAdapter, ...]:
         return tuple(tool for tool in self.discover() if domain in tool.domains)

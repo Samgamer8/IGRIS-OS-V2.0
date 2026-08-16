@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Sequence
 
-from igris_os.application.director import MissionDirector
+from igris_os.application.director import LLMMissionDirector, MissionDirector
 from igris_os.domain import Mission, MissionBranch
 
 
@@ -15,9 +15,27 @@ class RoutedAction:
 
 
 class MissionRouter:
+    def __init__(self, *, use_llm_director: bool = True) -> None:
+        self.use_llm_director = use_llm_director
+        self.director = LLMMissionDirector() if use_llm_director else MissionDirector()
+        self._plan_cache = {}
+
     def route(self, objective: str,
               attachments: Sequence[str] = ()) -> RoutedAction:
-        plan = MissionDirector().plan(Mission(objective))
+        if len(objective.split()) < 5:
+            cache_key = hash(objective) % 10000
+            if cache_key in self._plan_cache:
+                return self._plan_cache[cache_key]
+            low = objective.casefold()
+            if any(phrase in low for phrase in ("tus funciones", "tus capacidades", "qué puedes hacer", "que puedes hacer")):
+                result = RoutedAction("capability", "system.capabilities")
+                self._plan_cache[cache_key] = result
+                return result
+            if any(phrase in low for phrase in ("herramientas", "programas instalados")):
+                result = RoutedAction("capability", "system.tools")
+                self._plan_cache[cache_key] = result
+                return result
+        plan = self.director.plan(Mission(objective))
         low = objective.casefold()
         if any(phrase in low for phrase in (
                 "tus funciones", "tus capacidades", "qu\u00e9 puedes hacer",
@@ -76,6 +94,10 @@ class MissionRouter:
                     {"kind": "thumbnail", "output": "preview.png", "second": 0},
                     {"kind": "transcode", "output": "video_final.mp4"},
                 ]}, True)
+        if source and any(word in low for word in (
+                "verifica", "valida", "comprueba", "revisa visualmente")):
+            return RoutedAction(
+                "capability", "multimedia.verify", {"source": source})
         if attachments and any(word in low for word in (
                 "analiza", "revisa", "inspecciona", "resume", "archivos")):
             return RoutedAction(
@@ -85,25 +107,51 @@ class MissionRouter:
             return RoutedAction(
                 "capability", "programming.python.develop",
                 {"objective": objective}, True)
-        languages = {
-            "javascript": ("javascript", "node.js", "nodejs"),
-            "typescript": ("typescript",), "rust": ("rust",),
-            "cpp": ("c++", "cpp"), "java": ("java",),
-            "go": ("golang", "en go", "go lang", "programa go", "c\u00f3digo go", "codigo go"),
-        }
         if plan.branch is MissionBranch.PROGRAMMING:
-            for language, aliases in languages.items():
-                if any(alias in low for alias in aliases):
-                    return RoutedAction(
-                        "capability", "programming.multilang.develop",
-                        {"objective": objective, "language": language}, True)
+            language = _programming_language(low)
+            return RoutedAction(
+                "capability", "programming.autonomous.develop",
+                {"objective": objective, "language": language}, True)
+        if plan.branch is MissionBranch.GAMES and any(
+                word in low for word in ("exporta", "compila", "ejecutable",
+                                         "exe", "build", "empaqueta")):
+            return RoutedAction(
+                "capability", "games.godot.export", {}, True)
         if plan.branch is MissionBranch.GAMES and any(
                 word in low for word in ("crea", "construye", "genera")):
             return RoutedAction(
                 "capability", "games.godot.scaffold",
                 {"name": _project_name(objective),
                  "genre": _game_genre(low)}, True)
+        if plan.branch is MissionBranch.GAMES and any(
+                word in low for word in ("prueba", "ejecuta", "corre",
+                                         "playtest", "comprueba el juego",
+                                         "verifica el juego")):
+            return RoutedAction(
+                "capability", "games.godot.playtest", {}, True)
+        if any(phrase in low for phrase in (
+                "di algo", "di ", "pronuncia", "recita", "lee en voz alta",
+                "habla ahora", "repite esto", "reproduce este texto",
+                "reproduce el texto")):
+            return RoutedAction(
+                "capability", "voice.set",
+                {"objective": objective, "text": objective}, False)
         return RoutedAction("chat")
+
+
+def _programming_language(text: str) -> str:
+    languages = {
+        "javascript": ("javascript", "node.js", "nodejs"),
+        "typescript": ("typescript",),
+        "rust": ("rust",),
+        "cpp": ("c++", "cpp"),
+        "java": ("java",),
+        "go": ("golang", "en go", "go lang", "programa go", "c\u00f3digo go", "codigo go"),
+    }
+    for language, aliases in languages.items():
+        if any(alias in text for alias in aliases):
+            return language
+    return "python"
 
 
 def _dimensions(text: str) -> tuple[int, int]:
@@ -127,4 +175,4 @@ def _game_genre(text: str) -> str:
         return "platformer"
     if any(word in text for word in ("arcade", "maquinas recreativas")):
         return "arcade"
-    return "top_down"
+    return "top_down"

@@ -1,4 +1,4 @@
-from igris_os.application import CapabilityRegistry, MissionDirector
+from igris_os.application import CapabilityRegistry, LLMMissionDirector
 from igris_os.domain import ActionRisk, CapabilitySpec, ExecutionResult, Mission
 from igris_os.tools import ToolCatalog
 
@@ -34,6 +34,15 @@ def _plan(payload) -> ExecutionResult:
     objective = str(payload.get("objective", "")).strip()
     if not objective:
         return ExecutionResult.failure("Falta el objetivo", "EMPTY_OBJECTIVE")
-    plan = MissionDirector().plan(Mission(objective))
-    return ExecutionResult.success("Mision planificada", branch=plan.branch.value,
-                                   steps=plan.steps, acceptance=plan.acceptance)
+    plan = LLMMissionDirector().plan(Mission(objective))
+    return ExecutionResult.success(
+        "Mision planificada",
+        branch=plan.branch.value,
+        deliverables=plan.deliverables,
+        constraints=plan.constraints,
+        acceptance_criteria=plan.acceptance_criteria,
+        risks=plan.risks,
+        estimated_complexity=plan.estimated_complexity,
+        needs_clarification=plan.needs_clarification,
+        clarification_questions=plan.clarification_questions,
+    )

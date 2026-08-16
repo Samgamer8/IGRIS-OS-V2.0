@@ -1,3 +1,4 @@
+import hashlib
 import json
 import re
 from dataclasses import dataclass
@@ -5,6 +6,7 @@ from pathlib import Path
 from typing import Callable
 
 from igris_os.ai import ModelReply
+from igris_os.programming.coordinator import AutonomousProgrammingCoordinator
 from igris_os.programming.workshop import PythonWorkshop
 from igris_os.tools import safe_output
 
@@ -50,7 +52,7 @@ class PythonProjectDeveloper:
         for attempt in range(1, attempts + 1):
             if on_progress:
                 on_progress(int(90 * attempt / attempts),
-                            f"Intento {attempt}/{attempts} de generación")
+                            f"Intento {attempt}/{attempts} de generacion")
             prompt = SYSTEM + "\nOBJETIVO:\n" + objective
             if feedback:
                 prompt += "\nERROR VERIFICADO ANTERIOR:\n" + feedback[-1500:]
@@ -67,27 +69,33 @@ class PythonProjectDeveloper:
                 tests = str(package["tests"])
                 if "solution" not in tests:
                     tests = "from solution import *\n" + tests
-                report = PythonWorkshop(staging).verify(
-                    str(package["source"]), tests)
-                if not report.ok:
-                    last_error = report.message
-                    feedback = last_error
+                coordinator = AutonomousProgrammingCoordinator(
+                    self.client, staging, default_model=self.model)
+                result = coordinator.execute(
+                    objective, confirmed=True, context=package["source"],
+                    on_progress=on_progress)
+                if not result.ok:
+                    last_error = result.message
+                    feedback = "; ".join(result.diagnostics)
                     continue
                 if on_progress:
                     on_progress(95, "Entregando proyecto verificado")
                 target = safe_output(self.workspace, "projects/" + name)
                 if target.exists():
-                    name += "_" + report.sha256[:8]
+                    name += "_" + (result.proposal.sha256 if result.proposal and result.proposal.sha256 else "v2")
                     target = safe_output(self.workspace, "projects/" + name)
                 target.mkdir(parents=True)
-                (target / "main.py").write_text(str(package["source"]), encoding="utf-8")
+                source = result.proposal.source if result.proposal else package["source"]
+                tests_out = result.proposal.tests if result.proposal else tests
+                (target / "main.py").write_text(source, encoding="utf-8")
                 (target / "test_main.py").write_text(
-                    tests.replace("from solution import", "from main import"),
+                    tests_out.replace("from solution import", "from main import"),
                     encoding="utf-8")
                 (target / "README.md").write_text(
                     str(package.get("readme", objective)), encoding="utf-8")
+                digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
                 (target / "VERIFICATION.json").write_text(
-                    json.dumps({"sha256": report.sha256, "tests_passed": True},
+                    json.dumps({"sha256": digest, "tests_passed": True},
                                indent=2), encoding="utf-8")
                 return DevelopmentResult(True, "Proyecto generado y verificado",
                                          str(target), attempt)

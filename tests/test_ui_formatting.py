@@ -20,7 +20,9 @@ def test_tools_show_availability():
 
 def test_source_runtime_is_anchored_to_project():
     assert runtime_root().name == "runtime"
-    assert runtime_root().parent.name == "IGRIS OS V2.O"
+    # Independiente del nombre de la carpeta: el runtime debe vivir junto
+    # al paquete fuente (proyecto/src/igris_os).
+    assert (runtime_root().parent / "src" / "igris_os").is_dir()
 
 
 def test_pipeline_outputs_are_human_readable():

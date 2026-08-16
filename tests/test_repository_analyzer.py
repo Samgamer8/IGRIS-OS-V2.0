@@ -67,10 +67,12 @@ def test_repository_analyze_indexes_semantic_context(tmp_path):
         "def paint_background():\n    pass\n", encoding="utf-8")
     runtime = tmp_path / "runtime"
     kernel = build_igris(runtime)
+    mission = Mission("analiza el proyecto")
+    token = kernel.issue_approval(mission.objective, "repository.analyze")
     result = kernel.execute(
-        Mission("analiza el proyecto"), "repository.analyze",
+        mission, "repository.analyze",
         {"root": str(root), "query": "donde se ejecutan las misiones"},
-        confirmed=True)
+        approval=token)
     assert result.ok
     records = result.data["repository"]["records"]
     assert any(item["path"] == "core.py" for item in records)
