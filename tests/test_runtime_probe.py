@@ -36,3 +36,12 @@ def test_probe_missing_list_and_summary(tmp_path):
     assert all(not item.available for item in missing)
     summary = probe.summary()
     assert "FALTA" in summary or "SYS" in summary or "EMP" in summary
+
+
+def test_catalogue_has_k3_llm_runtime():
+    names = [spec.name for spec in RuntimeProbe.TOOLS]
+    assert "k3" in names
+    spec = RuntimeProbe.TOOLS[names.index("k3")]
+    assert spec.category == "llm"
+    assert "k3.exe" in spec.bundled
+
