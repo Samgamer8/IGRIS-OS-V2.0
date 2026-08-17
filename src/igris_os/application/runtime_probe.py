@@ -75,6 +75,22 @@ class RuntimeProbe:
             path = shutil.which(command)
             if path:
                 return ToolStatus(spec.name, spec.category, "external", path)
+        if spec.name == "ollama":
+            try:
+                import urllib.request
+                with urllib.request.urlopen("http://127.0.0.1:11434/api/tags", timeout=2) as r:
+                    if r.status == 200:
+                        return ToolStatus(spec.name, spec.category, "running", "http://127.0.0.1:11434")
+            except Exception:
+                pass
+        if spec.name == "lmstudio":
+            try:
+                import urllib.request
+                with urllib.request.urlopen("http://127.0.0.1:1234/v1/models", timeout=2) as r:
+                    if r.status == 200:
+                        return ToolStatus(spec.name, spec.category, "running", "http://127.0.0.1:1234")
+            except Exception:
+                pass
         return ToolStatus(spec.name, spec.category, "missing")
 
     def _find_bundled(self, patterns: tuple[str, ...]) -> Path | None:
@@ -89,7 +105,7 @@ class RuntimeProbe:
     def summary(self) -> str:
         lines = []
         for status in self.probe().values():
-            mark = {"internal": "EMP", "external": "SYS", "missing": "FALTA"}[status.state]
+            mark = {"internal": "EMP", "external": "SYS", "running": "ON", "missing": "FALTA"}[status.state]
             lines.append(f"[{mark}] {status.name:12s} {status.category:10s} {status.path}")
         return "\n".join(lines)
 

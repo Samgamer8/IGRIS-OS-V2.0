@@ -25,8 +25,8 @@ def test_probe_detects_bundled_tool_as_internal(tmp_path):
 def test_probe_missing_when_nothing_bundled(tmp_path):
     probe = RuntimeProbe(tmp_path)
     status = probe.probe()["ollama"]
-    assert status.state in ("internal", "external", "missing")
-    assert status.path == "" or Path(status.path).exists()
+    assert status.state in ("internal", "external", "missing", "running")
+    assert status.path == "" or status.path.startswith("http") or Path(status.path).exists()
 
 
 def test_probe_missing_list_and_summary(tmp_path):
@@ -35,7 +35,7 @@ def test_probe_missing_list_and_summary(tmp_path):
     assert isinstance(missing, list)
     assert all(not item.available for item in missing)
     summary = probe.summary()
-    assert "FALTA" in summary or "SYS" in summary or "EMP" in summary
+    assert "FALTA" in summary or "SYS" in summary or "EMP" in summary or "ON" in summary
 
 
 def test_catalogue_has_k3_llm_runtime():
