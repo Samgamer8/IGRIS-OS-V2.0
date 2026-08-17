@@ -29,7 +29,7 @@ class LLMMissionDirector:
         "Eres director de misiones. Convierte objetivos en contratos verificables. "
         "Devuelve SOLO JSON con: branch, deliverables, constraints, acceptance_criteria, "
         "risks, estimated_complexity, needs_clarification, clarification_questions. "
-        "Branches: general, games, video, audio, image, artificial_intelligence, "
+        "Branches: general, games, video, audio, visual_design, artificial_intelligence, "
         "programming, documents, systems. Sin markdown."
     )
 
