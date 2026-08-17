@@ -10,6 +10,7 @@ from igris_os.application import (
 from igris_os.bootstrap import build_igris
 from igris_os.domain import Mission
 from igris_os.memory import MemoryStore
+from igris_os.ai.server import ensure_ollama_server
 from igris_os.retrieval import RepositoryContextStore
 from igris_os.ui.galaxia import GalaxiaWidget
 from igris_os.voice import WindowsVoice
@@ -201,6 +202,7 @@ def run_cinematic_panel():
             self.router = MissionRouter()
             self.runtime = runtime_root()
             self.kernel = build_igris(self.runtime)
+            self.ai_server_running = ensure_ollama_server(auto=True)
             self.context_store = RepositoryContextStore(self.runtime)
             self.memory = MemoryStore(self.runtime / "memory" / "chat.db")
             self.mission_queue = MissionQueue(self.runtime / "missions_queue.json")

@@ -19,7 +19,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="igris", description="IGRIS OS V2.O")
     parser.add_argument("command", choices=("health", "capabilities", "plan",
                                             "providers", "inventory", "panel",
-                                            "probe"))
+                                            "probe", "ai"))
     parser.add_argument("value", nargs="?")
     parser.add_argument("--source", action="append", default=[])
     parser.add_argument("--output", default="runtime/inventory/sources.json")
@@ -65,6 +65,24 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "capabilities":
         print(json.dumps([{"name": s.name, "risk": s.risk.value} for s in kernel.registry.specs()], indent=2))
         return 0
+    if args.command == "ai":
+        from igris_os.ai.server import OllamaServer, server_status
+        action = args.value or "status"
+        if action == "status":
+            print(json.dumps(server_status(), ensure_ascii=False, indent=2))
+            return 0 if server_status()["running"] else 1
+        if action == "start":
+            ok = OllamaServer().ensure_running()
+            print(json.dumps({"running": ok, **server_status()},
+                             ensure_ascii=False, indent=2))
+            return 0 if ok else 1
+        if action == "stop":
+            server = OllamaServer()
+            server.stop()
+            print(json.dumps({"stopped": not server.is_running()},
+                             ensure_ascii=False, indent=2))
+            return 0
+        parser.error(f"ai necesita status|start|stop, got {action}")
     result = kernel.execute(Mission("Comprobar estado local"), "system.health")
     print(json.dumps({"ok": result.ok, "message": result.message, **result.data}, ensure_ascii=False, indent=2))
     return 0 if result.ok else 1
