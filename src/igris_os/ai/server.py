@@ -1,8 +1,8 @@
-"""Gestion del servidor Ollama interno de IGRIS.
+"""Gestion del servidor LLM local (Ollama o LM Studio).
 
 IGRIS OS autocontenido: el binario de Ollama vive en .tools/ollama/ (copiado
 del instalador, con libs CPU + CUDA; Apache-2.0) y este modulo lo arranca,
-comprueba y apaga en loopback. Los modelos siguen en ~/.ollama/models.
+comprueba y apaga en loopback. Tambien soporta LM Studio via API OpenAI.
 """
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from pathlib import Path
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _BUNDLED = _PROJECT_ROOT / ".tools" / "ollama" / "ollama.exe"
 DEFAULT_ENDPOINT = "http://127.0.0.1:11434"
+LMSTUDIO_ENDPOINT = "http://127.0.0.1:1234"
 
 _GLOBAL_SERVER: OllamaServer | None = None
 
@@ -34,6 +35,16 @@ def _path_ollama() -> Path | None:
     return Path(found) if found else None
 
 
+def is_lmstudio_running() -> bool:
+    """True si un servidor LM Studio responde en localhost:1234."""
+    try:
+        with urllib.request.urlopen(LMSTUDIO_ENDPOINT + "/v1/models",
+                                    timeout=1.5) as resp:
+            return resp.status == 200
+    except (OSError, ValueError, urllib.error.URLError):
+        return False
+
+
 def is_ollama_running(endpoint: str = DEFAULT_ENDPOINT) -> bool:
     """True si un servidor Ollama responde en el endpoint (loopback)."""
     try:
@@ -41,6 +52,20 @@ def is_ollama_running(endpoint: str = DEFAULT_ENDPOINT) -> bool:
             return resp.status == 200
     except (OSError, ValueError, urllib.error.URLError):
         return False
+
+
+def is_local_llm_running() -> bool:
+    """True si Ollama o LM Studio estan activos."""
+    return is_ollama_running() or is_lmstudio_running()
+
+
+def detect_backend() -> str:
+    """Devuelve 'ollama', 'lmstudio' o 'none'."""
+    if is_ollama_running():
+        return "ollama"
+    if is_lmstudio_running():
+        return "lmstudio"
+    return "none"
 
 
 class OllamaServer:
@@ -95,7 +120,7 @@ class OllamaServer:
 
 
 def ensure_ollama_server(auto: bool = False) -> bool:
-    """Asegura un servidor Ollama en loopback usando el binario interno.
+    """Asegura un servidor LLM en loopback (Ollama o LM Studio).
 
     Con ``auto=False`` (por defecto) solo comprueba; nunca arranca procesos,
     para que las llamadas desde tests o chequeos no lancen nada.
@@ -103,7 +128,7 @@ def ensure_ollama_server(auto: bool = False) -> bool:
     Mantiene una referencia global al servidor para evitar procesos huerfanos.
     """
     global _GLOBAL_SERVER
-    if is_ollama_running():
+    if is_local_llm_running():
         return True
     if not auto:
         return False
@@ -114,12 +139,16 @@ def ensure_ollama_server(auto: bool = False) -> bool:
 
 def server_status() -> dict:
     exe = _path_ollama()
-    running = is_ollama_running()
+    ollama_ok = is_ollama_running()
+    lmstudio_ok = is_lmstudio_running()
+    running = ollama_ok or lmstudio_ok
+    backend = "ollama" if ollama_ok else ("lmstudio" if lmstudio_ok else "none")
     return {
         "running": running,
+        "backend": backend,
         "internal": bundled_ollama() is not None,
         "executable": str(exe) if exe else None,
-        "endpoint": DEFAULT_ENDPOINT,
+        "endpoint": LMSTUDIO_ENDPOINT if backend == "lmstudio" else DEFAULT_ENDPOINT,
     }
 
 

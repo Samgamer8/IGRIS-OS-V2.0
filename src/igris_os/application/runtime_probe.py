@@ -38,6 +38,7 @@ class RuntimeProbe:
 
     TOOLS: tuple[ToolSpec, ...] = (
         ToolSpec("ollama", "llm", ("ollama",), ("ollama.exe", "ollama")),
+        ToolSpec("lmstudio", "llm", ("lms",), ("lms.exe",)),
         ToolSpec("k3", "llm", ("k3", "kimi-k3"), ("k3.exe",)),
         ToolSpec("git", "vcs", ("git",), ("git.exe",)),
         ToolSpec("ffmpeg", "media", ("ffmpeg",), ("ffmpeg.exe",)),

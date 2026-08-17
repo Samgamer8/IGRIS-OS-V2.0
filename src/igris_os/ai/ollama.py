@@ -15,6 +15,12 @@ class ModelReply:
     error: str = ""
 
 
+# Module-level cached backend detection (probes once, shared by all instances)
+_backend_probed = False
+_detected_backend: str = "ollama"
+_detected_endpoint: str = "http://127.0.0.1:11434"
+
+
 class _ResponseCache:
     """Bounded LRU cache keyed by (prompt_hash, model, temperature)."""
 
@@ -55,10 +61,13 @@ class OllamaClient:
                  timeout: float = 120) -> None:
         if not endpoint.startswith(("http://127.0.0.1", "http://localhost")):
             raise ValueError("Ollama debe usar loopback")
-        self.endpoint = endpoint.rstrip("/")
         self.timeout = timeout
         self._cache = _ResponseCache(max_size=256)
         self._opener = self._build_opener()
+        self.endpoint = endpoint.rstrip("/")
+        self._backend = "ollama"
+        if endpoint == "http://127.0.0.1:11434":
+            self._detect_backend()
 
     @staticmethod
     def _build_opener() -> urllib.request.OpenerDirector:
@@ -67,6 +76,38 @@ class OllamaClient:
             urllib.request.HTTPSHandler(),
         )
         return opener
+
+    def _detect_backend(self) -> None:
+        global _backend_probed, _detected_backend, _detected_endpoint
+        if not _backend_probed:
+            opener = self._build_opener()
+            # Try Ollama first
+            try:
+                req = urllib.request.Request("http://127.0.0.1:11434/api/tags")
+                with opener.open(req, timeout=1) as resp:
+                    if resp.status == 200:
+                        _detected_backend = "ollama"
+                        _detected_endpoint = "http://127.0.0.1:11434"
+                        _backend_probed = True
+            except (OSError, urllib.error.URLError):
+                pass
+            # Try LM Studio
+            if not _backend_probed:
+                try:
+                    req = urllib.request.Request("http://127.0.0.1:1234/v1/models")
+                    with opener.open(req, timeout=1) as resp:
+                        if resp.status == 200:
+                            _detected_backend = "lmstudio"
+                            _detected_endpoint = "http://127.0.0.1:1234"
+                            _backend_probed = True
+                except (OSError, urllib.error.URLError):
+                    pass
+            if not _backend_probed:
+                _detected_backend = "ollama"
+                _detected_endpoint = "http://127.0.0.1:11434"
+                _backend_probed = True
+        self.endpoint = _detected_endpoint
+        self._backend = _detected_backend
 
     @staticmethod
     def _hash_prompt(prompt: str) -> str:
@@ -103,38 +144,79 @@ class OllamaClient:
 
     def models(self) -> tuple[str, ...]:
         try:
-            with self._opener.open(self.endpoint + "/api/tags", timeout=3) as response:
-                data = json.load(response)
-            return tuple(item["name"] for item in data.get("models", [])
-                         if isinstance(item, dict) and item.get("name"))
+            if self._backend == "lmstudio":
+                with self._opener.open(self.endpoint + "/v1/models",
+                                       timeout=3) as response:
+                    data = json.load(response)
+                return tuple(item["id"] for item in data.get("data", [])
+                             if isinstance(item, dict) and item.get("id"))
+            else:
+                with self._opener.open(self.endpoint + "/api/tags",
+                                       timeout=3) as response:
+                    data = json.load(response)
+                return tuple(item["name"] for item in data.get("models", [])
+                             if isinstance(item, dict) and item.get("name"))
         except (OSError, ValueError, urllib.error.URLError):
             return ()
 
     def generate_stream(self, prompt: str, model: str,
                         temperature: float = 0.0) -> collections.abc.Iterator[str]:
-        """Yield text chunks as they arrive from Ollama's streaming API."""
+        """Yield text chunks as they arrive from the LLM API."""
         if not prompt.strip() or not model.strip():
             return
 
+        if self._backend == "lmstudio":
+            yield from self._stream_openai(prompt, model, temperature)
+        else:
+            yield from self._stream_ollama(prompt, model, temperature)
+
+    def _stream_openai(self, prompt: str, model: str,
+                       temperature: float) -> collections.abc.Iterator[str]:
+        body = json.dumps({
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": True,
+            "temperature": temperature,
+        }).encode()
+        request = urllib.request.Request(
+            self.endpoint + "/v1/chat/completions", data=body,
+            headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with self._opener.open(request, timeout=self.timeout) as response:
+                for line in response:
+                    line = line.decode("utf-8", errors="replace").strip()
+                    if not line or not line.startswith("data: "):
+                        continue
+                    payload = line[6:]
+                    if payload == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(payload)
+                        delta = chunk["choices"][0].get("delta", {})
+                        content = delta.get("content", "")
+                        if content:
+                            yield content
+                    except (json.JSONDecodeError, KeyError, IndexError,
+                            TypeError):
+                        continue
+        except (OSError, ValueError, urllib.error.URLError):
+            return
+
+    def _stream_ollama(self, prompt: str, model: str,
+                       temperature: float) -> collections.abc.Iterator[str]:
         body = json.dumps({
             "model": model,
             "prompt": prompt,
             "stream": True,
             "options": {"temperature": temperature}
         }).encode()
-
         request = urllib.request.Request(
-            self.endpoint + "/api/generate",
-            data=body,
-            headers={"Content-Type": "application/json"},
-            method="POST"
-        )
-
+            self.endpoint + "/api/generate", data=body,
+            headers={"Content-Type": "application/json"}, method="POST")
         buffer = ""
         is_json_mode = prompt.strip().lower().startswith(
             ("json", "```json", "{")
         )
-
         try:
             with self._opener.open(request, timeout=self.timeout) as response:
                 for line in response:
@@ -165,6 +247,32 @@ class OllamaClient:
         if cached is not None:
             return ModelReply(True, cached, model)
 
+        if self._backend == "lmstudio":
+            return self._generate_openai(prompt, model, prompt_hash)
+        return self._generate_ollama(prompt, model, prompt_hash)
+
+    def _generate_openai(self, prompt: str, model: str,
+                         prompt_hash: str) -> ModelReply:
+        body = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+            "temperature": 0.0,
+        }
+        data = self._post_json("/v1/chat/completions", body)
+        if data is None:
+            return ModelReply(False, "", model, "LM Studio no responde")
+        try:
+            text = data["choices"][0]["message"]["content"].strip()
+        except (KeyError, IndexError, TypeError):
+            return ModelReply(False, "", model, "Respuesta malformada")
+        if text:
+            self._cache.put(prompt_hash, model, 0.0, text)
+        return ModelReply(bool(text), text, model,
+                          "" if text else "Respuesta vacia")
+
+    def _generate_ollama(self, prompt: str, model: str,
+                         prompt_hash: str) -> ModelReply:
         body = json.dumps({"model": model, "prompt": prompt, "stream": False}).encode()
         request = urllib.request.Request(
             self.endpoint + "/api/generate", data=body,
@@ -180,10 +288,38 @@ class OllamaClient:
         except (OSError, ValueError, urllib.error.URLError) as exc:
             return ModelReply(False, "", model, str(exc))
 
+    def _post_json(self, path: str, body: dict) -> dict | None:
+        data = json.dumps(body).encode()
+        request = urllib.request.Request(
+            self.endpoint + path, data=data,
+            headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with self._opener.open(
+                    request, timeout=self.timeout) as response:
+                return json.load(response)
+        except (OSError, ValueError, urllib.error.URLError):
+            return None
+
     def embed(self, texts: list[str], model: str) -> tuple[bool, list[list[float]]]:
         """Vectoriza textos con un modelo de embeddings local (loopback)."""
         if not texts or not model.strip():
             return False, []
+        if self._backend == "lmstudio":
+            return self._embed_openai(texts, model)
+        return self._embed_ollama(texts, model)
+
+    def _embed_openai(self, texts: list[str], model: str) -> tuple[bool, list[list[float]]]:
+        body = {"model": model, "input": texts}
+        data = self._post_json("/v1/embeddings", body)
+        if data is None:
+            return False, []
+        try:
+            vectors = [item["embedding"] for item in data["data"]]
+            return True, vectors
+        except (KeyError, IndexError, TypeError):
+            return False, []
+
+    def _embed_ollama(self, texts: list[str], model: str) -> tuple[bool, list[list[float]]]:
         body = json.dumps({"model": model, "input": texts}).encode()
         request = urllib.request.Request(
             self.endpoint + "/api/embed", data=body,
