@@ -432,7 +432,7 @@ def run_cinematic_panel():
                 " → ".join(preview))
             self.status.setText("● Estado: Procesando")
             self.status.setStyleSheet("color:#ffbe55;background:transparent;")
-            action = self.router.route(objective, self.attachments)
+            action = self._route_with_plan(plan, objective)
             if action.kind == "capability":
                 answer = QMessageBox.StandardButton.Yes
                 if action.requires_confirmation:
@@ -452,6 +452,102 @@ def run_cinematic_panel():
             pending = self.mission_queue.summary()["pending"]
             self.chat.append(f"[COLA] Misión {job.id[:8]} registrada · pendientes: {pending}")
             self.dispatch_next()
+
+        def _route_with_plan(self, plan, objective: str):
+            from igris_os.application.mission_router import (
+                RoutedAction, _programming_language, _dimensions,
+                _project_name, _game_genre)
+            from pathlib import Path as _P
+            low = objective.casefold()
+            if any(phrase in low for phrase in (
+                    "tus funciones", "tus capacidades", "qué puedes hacer",
+                    "que puedes hacer", "capacidades tienes")):
+                return RoutedAction("capability", "system.capabilities")
+            if any(phrase in low for phrase in (
+                    "herramientas disponibles", "herramientas tienes",
+                    "programas instalados")):
+                return RoutedAction("capability", "system.tools")
+            source = str(_P(self.attachments[0]).resolve()) if self.attachments else ""
+            if any(phrase in low for phrase in (
+                    "coordina especialistas", "revisión cruzada",
+                    "revision cruzada", "equipo de especialistas")):
+                return RoutedAction("capability", "mission.coordinate",
+                                    {"objective": objective}, True)
+            if source and _P(source).is_dir() and any(word in low for word in (
+                    "modifica", "arregla", "implementa", "corrige", "programa")):
+                return RoutedAction("capability", "repository.develop",
+                                    {"root": source, "objective": objective}, True)
+            if source and _P(source).is_dir() and any(phrase in low for phrase in (
+                    "copia aislada", "prepara este proyecto",
+                    "trabaja en este proyecto", "prepara el repositorio")):
+                return RoutedAction("capability", "repository.stage",
+                                    {"root": source}, True)
+            if source and _P(source).is_dir() and any(word in low for word in (
+                    "repositorio", "proyecto", "código", "codigo", "carpeta")):
+                return RoutedAction("capability", "repository.analyze",
+                                    {"root": source, "query": objective}, True)
+            if source and any(word in low for word in (
+                    "redimensiona", "resize", "escala")):
+                w, h = _dimensions(low)
+                return RoutedAction("capability", "image.resize",
+                                    {"source": source, "output": "imagen_redimensionada.png",
+                                     "width": w, "height": h}, True)
+            if source and any(word in low for word in (
+                    "extrae audio", "extraer audio", "a mp3")):
+                return RoutedAction("capability", "multimedia.extract_audio",
+                                    {"source": source, "output": "audio_extraido.mp3"}, True)
+            if source and any(word in low for word in (
+                    "miniatura", "fotograma", "thumbnail")):
+                return RoutedAction("capability", "multimedia.thumbnail",
+                                    {"source": source, "output": "miniatura.png"}, True)
+            if source and any(word in low for word in (
+                    "convierte", "transcodifica", "a mp4")):
+                return RoutedAction("capability", "multimedia.transcode",
+                                    {"source": source, "output": "video_convertido.mp3"}, True)
+            if source and any(phrase in low for phrase in (
+                    "edita este video", "procesa este video", "prepara este video",
+                    "edita el video", "procesa el video")):
+                return RoutedAction("capability", "multimedia.pipeline",
+                                    {"source": source, "operations": [
+                                        {"kind": "thumbnail", "output": "preview.png", "second": 0},
+                                        {"kind": "transcode", "output": "video_final.mp4"},
+                                    ]}, True)
+            if source and any(word in low for word in (
+                    "verifica", "valida", "comprueba", "revisa visualmente")):
+                return RoutedAction("capability", "multimedia.verify",
+                                    {"source": source})
+            if self.attachments and any(word in low for word in (
+                    "analiza", "revisa", "inspecciona", "resume", "archivos")):
+                return RoutedAction("capability", "files.inspect",
+                                    {"sources": [str(_P(a).resolve()) for a in self.attachments]})
+            if plan.branch is MissionBranch.PROGRAMMING and "python" in low:
+                return RoutedAction("capability", "programming.python.develop",
+                                    {"objective": objective}, True)
+            if plan.branch is MissionBranch.PROGRAMMING:
+                language = _programming_language(low)
+                return RoutedAction("capability", "programming.autonomous.develop",
+                                    {"objective": objective, "language": language}, True)
+            if plan.branch is MissionBranch.GAMES and any(
+                    word in low for word in ("exporta", "compila", "ejecutable",
+                                             "exe", "build", "empaqueta")):
+                return RoutedAction("capability", "games.godot.export", {}, True)
+            if plan.branch is MissionBranch.GAMES and any(
+                    word in low for word in ("crea", "construye", "genera")):
+                return RoutedAction("capability", "games.godot.scaffold",
+                                    {"name": _project_name(objective),
+                                     "genre": _game_genre(low)}, True)
+            if plan.branch is MissionBranch.GAMES and any(
+                    word in low for word in ("prueba", "ejecuta", "corre",
+                                             "playtest", "comprueba el juego",
+                                             "verifica el juego")):
+                return RoutedAction("capability", "games.godot.playtest", {}, True)
+            if any(phrase in low for phrase in (
+                    "di algo", "di ", "pronuncia", "recita", "lee en voz alta",
+                    "habla ahora", "repite esto", "reproduce este texto",
+                    "reproduce el texto")):
+                return RoutedAction("capability", "voice.set",
+                                    {"objective": objective, "text": objective}, False)
+            return RoutedAction("chat")
 
         def dispatch_next(self):
             if self.active_job is not None:
