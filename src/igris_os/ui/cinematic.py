@@ -390,6 +390,9 @@ def run_cinematic_panel():
             self.chat.append(f"\n[USUARIO] {objective}")
             self.memory.remember(
                 "chat", {"role": "user", "text": objective}, verified=True)
+            if self._is_greeting(objective):
+                self.finish_message("Aqui estoy. Que necesitas?", True)
+                return
             self.plan_label.setText("MISIÓN: Planificando...")
             self.plan_label.show()
             self.status.setText("● Estado: Planificando")
@@ -399,6 +402,16 @@ def run_cinematic_panel():
             threading.Thread(
                 target=self._plan_in_background, args=(objective,),
                 daemon=True).start()
+
+        _GREETINGS = frozenset({
+            "hola", "hey", "hi", "buenas", "que tal", "como estas",
+            "buenos dias", "buenas tardes", "buenas noches", "buen dia",
+            "holis", "holi", "saludos", "que onda", "que hubo",
+        })
+
+        def _is_greeting(self, text: str) -> bool:
+            clean = text.strip().lower().strip("¿?!. ")
+            return clean in self._GREETINGS
 
         def _plan_in_background(self, objective: str):
             try:

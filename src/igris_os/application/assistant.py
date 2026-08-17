@@ -246,7 +246,7 @@ class AssistantService:
         model = self.choose_model(plan.branch, objective)
         if not model:
             return AssistantReply(
-                False, "Ollama no esta disponible o no tiene modelos instalados.", "", 0)
+                False, "Servidor LLM no disponible o sin modelos instalados.", "", 0)
         memory = self._build_context(context)
         prompt = (SYSTEM + "\nRAMA: " + plan.branch.value +
                   ("\nCONTEXTO LOCAL VERIFICADO:\n" + memory if memory else "") +
@@ -269,7 +269,7 @@ class AssistantService:
         plan = self.director.plan(Mission(objective))
         model = self.choose_model(plan.branch, objective)
         if not model:
-            return AssistantReply(False, "Ollama no esta disponible.", "", 0)
+            return AssistantReply(False, "Servidor LLM no disponible.", "", 0)
         memory = self._build_context(context)
         turns_context = self.state.recent_context(limit=20)
         history = "\n".join(f"{t['role']}: {t['text']}" for t in turns_context)

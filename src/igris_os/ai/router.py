@@ -59,18 +59,40 @@ class Route:
 
 
 class ModelRouter:
-    """Selecciona un modelo local disponible segun dificultad, tarea y coste."""
+    """Selecciona un modelo local disponible segun dificultad, tarea y coste.
+
+    Soporta tanto Ollama (qwen2.5-coder:7b) como LM Studio (Qwen3.6-27B-GGUF).
+    Los modelos vision (GLM-4.6V, Qwen-VL) se excluyen automaticamente de
+    tareas de texto puro para evitar que confundan la palabra "image" del
+    prompt del director con una solicitud de imagen.
+    """
+
+    # Modelos que deben evitarse para tareas de texto puro (solo vision)
+    _VISION_EXCLUDE: frozenset[str] = frozenset({
+        "glm-4.6v-flash", "glm-4v-flash", "glm-4v",
+        "qwen-vl", "qwen2-vl", "qwen3-vl",
+        "llava", "bakllava", "moondream",
+        "cogvlm", "internvl",
+    })
 
     CODER_TIERS: dict[Difficulty, tuple[str, ...]] = {
-        Difficulty.SIMPLE: ("qwen2.5-coder:1.5b", "qwen2.5-coder:1.5b-base"),
-        Difficulty.NORMAL: ("qwen2.5-coder:7b", "qwen2.5-coder:latest"),
-        Difficulty.COMPLEX: ("qwen2.5-coder:14b", "qwen2.5-coder:7b"),
+        Difficulty.SIMPLE: ("qwen2.5-coder:1.5b", "qwen2.5-coder:1.5b-base",
+                            "Qwen3.6-35B-A3B-GGUF", "Qwen3.6-27B-GGUF"),
+        Difficulty.NORMAL: ("qwen2.5-coder:7b", "qwen2.5-coder:latest",
+                            "Qwen3.6-35B-A3B-GGUF", "Qwen3.6-27B-GGUF"),
+        Difficulty.COMPLEX: ("qwen2.5-coder:14b", "qwen2.5-coder:7b",
+                             "Qwen3.6-35B-A3B-GGUF", "Kimi-K3-GGUF",
+                             "gpt-oss-20b"),
     }
     GENERAL_TIERS: dict[Difficulty, tuple[str, ...]] = {
         Difficulty.SIMPLE: ("llama3.1:8b", "llama3.1:latest",
-                            "llama3.2:latest", "qwen2.5-coder:1.5b"),
-        Difficulty.NORMAL: ("llama3.1:8b", "llama3.1:latest", "llama3:latest"),
-        Difficulty.COMPLEX: ("llama3.1:8b", "llama3.2:latest"),
+                            "llama3.2:latest", "qwen2.5-coder:1.5b",
+                            "Qwen3.6-35B-A3B-GGUF", "Qwen3.6-27B-GGUF"),
+        Difficulty.NORMAL: ("llama3.1:8b", "llama3.1:latest", "llama3:latest",
+                            "Qwen3.6-35B-A3B-GGUF", "Kimi-K3-GGUF",
+                            "gpt-oss-20b"),
+        Difficulty.COMPLEX: ("llama3.1:8b", "llama3.2:latest",
+                             "Kimi-K3-GGUF", "gpt-oss-20b"),
     }
     CONTEXT_WINDOW: dict[str, int] = {
         "qwen2.5-coder:1.5b": 32768, "qwen2.5-coder:1.5b-base": 32768,
@@ -78,10 +100,42 @@ class ModelRouter:
         "qwen2.5-coder:14b": 32768,
         "llama3.1:8b": 131072, "llama3.1:latest": 131072,
         "llama3:latest": 8192, "llama3.2:latest": 131072,
+        "Qwen3.6-27B-GGUF": 131072, "Qwen3.6-35B-A3B-GGUF": 131072,
+        "Kimi-K3-GGUF": 131072, "gpt-oss-20b": 131072,
     }
 
     def __init__(self, client: OllamaClient | None = None) -> None:
         self.client = client or OllamaClient()
+
+    @staticmethod
+    def _name_matches(tier_name: str, installed_name: str) -> bool:
+        """Match exact names or prefix matches (e.g. 'gpt-oss-20b' matches 'gpt-oss-20b-MXFP4.gguf')."""
+        if tier_name == installed_name:
+            return True
+        t = tier_name.lower()
+        i = installed_name.lower()
+        if t == i:
+            return True
+        # Prefix match for GGUF filenames
+        if i.startswith(t) and (len(i) == len(t) or i[len(t)] in "-_."):
+            return True
+        # Base name match: 'Qwen3.6-27B-GGUF' matches 'Qwen3.6-27B-Q4_K_M.gguf'
+        # Extract base (e.g. 'qwen3.6-27b') and check prefix
+        import re
+        t_base = re.split(r"[-_](?:gguf|q\d|mxfp)", t, maxsplit=1)[0]
+        i_base = re.split(r"[-_](?:gguf|q\d|mxfp)", i, maxsplit=1)[0]
+        if t_base == i_base:
+            return True
+        return False
+
+    def _find_installed(self, tier_names: tuple[str, ...],
+                        installed: tuple[str, ...]) -> str:
+        """Find first tier name that matches an installed model, excluding vision-only."""
+        for tier_name in tier_names:
+            for inst_name in installed:
+                if self._name_matches(tier_name, inst_name) and not self._is_vision_only(inst_name):
+                    return inst_name
+        return ""
 
     def route(self, difficulty: Difficulty, *, code: bool = False,
               mode: RoutingMode = RoutingMode.LOCAL_ONLY,
@@ -89,29 +143,43 @@ class ModelRouter:
               objective: str = "") -> Route:
         installed = self.client.models()
         if not installed:
-            return Route("", difficulty, "Ollama sin modelos instalados", mode)
+            return Route("", difficulty, "Sin modelos instalados", mode)
         difficulty = self._adjust(difficulty, mode)
         tiers = self.CODER_TIERS if code else self.GENERAL_TIERS
-        chosen = ""
-        reason = ""
-        for name in tiers[difficulty]:
-            if name in installed:
-                chosen, reason = name, "nivel seleccionado"
-                break
+        chosen = self._find_installed(tiers[difficulty], installed)
+        reason = "nivel seleccionado" if chosen else ""
+
         if not chosen:
             family = "qwen2.5-coder" if code else "llama"
             for name in sorted(installed):
-                if name.startswith(family):
+                if name.startswith(family) and not self._is_vision_only(name):
                     chosen, reason = name, "nivel no disponible, familia"
                     break
         if not chosen:
-            chosen, reason = sorted(installed)[0], "modelo instalado"
+            for name in sorted(installed):
+                if not self._is_vision_only(name):
+                    chosen, reason = name, "modelo instalado"
+                    break
+        if not chosen:
+            chosen, reason = sorted(installed)[0], "solo vision disponible"
 
         estimated = self.estimate_tokens(objective, difficulty)
         if budget and budget.max_tokens > 0:
             chosen, reason = self._fit_budget(
                 chosen, estimated, budget.max_tokens, installed, reason)
         return Route(chosen, difficulty, reason, mode, estimated)
+
+    @classmethod
+    def _is_vision_only(cls, model_name: str) -> bool:
+        """True si el modelo es exclusivamente de vision (no sirve para texto)."""
+        lower = model_name.lower()
+        # Match exact names or prefixes
+        if any(lower == ex or lower.startswith(ex + "-") for ex in cls._VISION_EXCLUDE):
+            return True
+        # gguf filenames with vision hints
+        if "mmproj" in lower:
+            return True
+        return False
 
     @staticmethod
     def _adjust(difficulty: Difficulty, mode: RoutingMode) -> Difficulty:
