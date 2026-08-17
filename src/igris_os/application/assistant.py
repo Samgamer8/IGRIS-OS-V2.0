@@ -165,7 +165,7 @@ class AssistantService:
     def _run_sandboxed(self, command: Sequence[str], cwd: Optional[str] = None,
                        timeout_seconds: Optional[int] = None) -> SandboxRun:
         return self.sandbox.run(list(command), cwd=cwd,
-                                timeout=timeout_seconds or 60)
+                                timeout=timeout_seconds if timeout_seconds is not None else 60)
 
     def _tool_git_status(self, args: str) -> str:
         cwd = args.strip() or "."
@@ -224,11 +224,11 @@ class AssistantService:
         summary = self.compressor.fallback_summarize(
             [{"role": t.role, "text": t.text} for t in old_turns])
         for _ in range(len(old_turns)):
-            self.turns.popleft()
-        if self.turns and self.turns[0].role == "assistant":
-            self.turns[0].text = f"[Contexto resumido]\n{summary}\n\n" + self.turns[0].text
+            self.state.turns.popleft()
+        if self.state.turns and self.state.turns[0].role == "assistant":
+            self.state.turns[0].text = f"[Contexto resumido]\n{summary}\n\n" + self.state.turns[0].text
         else:
-            self.turns.appendleft(ConversationTurn(role="system", text=f"[Contexto resumido]\n{summary}"))
+            self.state.turns.appendleft(ConversationTurn(role="system", text=f"[Contexto resumido]\n{summary}"))
         return summary
 
     def respond(self, objective: str,

@@ -88,20 +88,13 @@ class OllamaClient:
     def _is_complete_json(buffer: str) -> bool:
         """Heuristic: detect if buffer contains a complete JSON value."""
         stripped = buffer.strip()
-        if not stripped:
+        if not stripped or stripped[-1] not in ("}", "]"):
             return False
-        for end_ch, start_ch in (("}", "{"), ("]", "[")):
-            if stripped.endswith(end_ch):
-                depth = 0
-                for ch in stripped:
-                    if ch == start_ch:
-                        depth += 1
-                    elif ch == end_ch:
-                        depth -= 1
-                        if depth == 0:
-                            return True
-                return False
-        return False
+        try:
+            json.loads(stripped)
+            return True
+        except (json.JSONDecodeError, ValueError):
+            return False
 
     def _urlopen_with_timeouts(self, request: urllib.request.Request,
                                 timeout: float) -> urllib.response.addinfo:

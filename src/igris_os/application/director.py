@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Sequence
 
 from igris_os.ai import ModelReply, OllamaClient
@@ -44,6 +44,11 @@ class LLMMissionDirector:
         MissionBranch.SYSTEMS: ("windows", "ordenador", "cpu", "ram", "sistema"),
     }
 
+    _BRANCH_PATTERNS: dict[MissionBranch, list[re.Pattern]] = {
+        branch: [re.compile(rf"(?<!\w){re.escape(kw)}(?!\w)") for kw in keywords]
+        for branch, keywords in BRANCH_KEYWORDS.items()
+    }
+
     def __init__(self, client: OllamaClient | None = None,
                  fallback_model: str = "qwen2.5-coder:7b") -> None:
         self.client = client or OllamaClient()
@@ -67,8 +72,8 @@ class LLMMissionDirector:
 
     def _classify_branch(self, objective: str) -> MissionBranch:
         text = re.sub(r"\s+", " ", objective.casefold()).strip()
-        for branch, keywords in self.BRANCH_KEYWORDS.items():
-            if any(re.search(rf"(?<!\w){re.escape(term)}(?!\w)", text) for term in keywords):
+        for branch, patterns in self._BRANCH_PATTERNS.items():
+            if any(pat.search(text) for pat in patterns):
                 return branch
         return MissionBranch.GENERAL
 

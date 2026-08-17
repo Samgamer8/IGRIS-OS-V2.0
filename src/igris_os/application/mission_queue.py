@@ -78,7 +78,6 @@ class MissionQueue:
             job.progress = max(job.progress, progress)
             if message:
                 job.message = message[:1000]
-            self._save()
 
     def request_active_cancellation(self) -> bool:
         with self._lock:

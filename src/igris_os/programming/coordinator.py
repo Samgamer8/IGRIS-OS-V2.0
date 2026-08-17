@@ -75,13 +75,14 @@ class AutonomousProgrammingCoordinator:
         if not objective.strip():
             return AutonomousResult(False, "Falta el objetivo")
 
-        plan = self._plan_cache.get(hash(objective))
+        cache_key = objective.strip().casefold()
+        plan = self._plan_cache.get(cache_key)
         if plan is None:
             if on_progress:
                 on_progress(5, "Fase 1: Arquitectura")
             plan = self._architect(objective, context, language)
             if plan:
-                self._plan_cache[hash(objective)] = plan
+                self._plan_cache[cache_key] = plan
         if not plan:
             return AutonomousResult(False, "Fallo en fase de arquitectura",
                                     diagnostics=("architect_failed",))
@@ -127,13 +128,14 @@ class AutonomousProgrammingCoordinator:
             return AutonomousResult(False, "Se necesita confirmacion")
         if not objective.strip():
             return AutonomousResult(False, "Falta el objetivo")
-        plan = self._plan_cache.get(hash(objective))
+        cache_key = objective.strip().casefold()
+        plan = self._plan_cache.get(cache_key)
         if plan is None:
             if on_progress:
                 on_progress(5, "ReAct: Pensamiento inicial")
             plan = self._architect(objective, context, language)
             if plan:
-                self._plan_cache[hash(objective)] = plan
+                self._plan_cache[cache_key] = plan
         if not plan:
             return AutonomousResult(False, "Fallo en arquitectura",
                                     diagnostics=("architect_failed",))

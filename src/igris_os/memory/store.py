@@ -101,12 +101,14 @@ class MemoryStore:
                 (category, now, len(rows)))
             return [int(row[0]) for row in cursor.fetchall()]
 
-    def recall(self, category: str, *, verified_only: bool = True) -> list[dict]:
+    def recall(self, category: str, *, verified_only: bool = True,
+               limit: int = 100) -> list[dict]:
         query = "SELECT id,content,verified,created_at FROM memories WHERE category=?"
-        args = [category]
+        args: list = [category]
         if verified_only:
             query += " AND verified=1"
-        query += " ORDER BY id DESC"
+        query += " ORDER BY id DESC LIMIT ?"
+        args.append(limit)
         db = self._get_connection()
         rows = db.execute(query, args).fetchall()
         return [{"id": row[0], "content": json.loads(row[1]),

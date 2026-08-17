@@ -1,8 +1,8 @@
 ﻿from __future__ import annotations
 
 import json
-import os
 import re
+import time
 import urllib.request
 import urllib.error
 from typing import Any
@@ -14,6 +14,7 @@ class ContextCompressor:
             raise ValueError("Ollama debe usar loopback")
         self.ollama_url = ollama_url.rstrip("/")
         self._ollama_available: bool | None = None
+        self._ollama_check_time: float = 0.0
 
     def estimate_tokens(self, text: str) -> int:
         ratio = 2.0 if re.search(r"[áéíóúñÁÉÍÓÚÑüÜ]", text) else 4.0
@@ -80,7 +81,8 @@ class ContextCompressor:
         return "\n".join(f"{m.get('role', 'user')}: {m.get('text', '')}" for m in conversation)
 
     def _is_ollama_available(self) -> bool:
-        if self._ollama_available is not None:
+        now = time.monotonic()
+        if self._ollama_available is not None and (now - self._ollama_check_time) < 30:
             return self._ollama_available
         try:
             with urllib.request.urlopen(f"{self.ollama_url}/api/tags", timeout=3) as resp:
@@ -88,6 +90,7 @@ class ContextCompressor:
         except (urllib.error.URLError, urllib.error.HTTPError,
                 TimeoutError, OSError):
             self._ollama_available = False
+        self._ollama_check_time = now
         return self._ollama_available
 
 

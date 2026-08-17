@@ -138,11 +138,11 @@ class ToolChainEngine:
         sem = threading.Semaphore(self.MAX_WORKERS)
         threads = []
         for step in steps:
-            t = threading.Thread(target=self._run_step_with_retry, args=(step, context, results, sem))
+            t = threading.Thread(target=self._run_step_with_retry, args=(step, context, results, sem), daemon=True)
             threads.append(t)
             t.start()
         for t in threads:
-            t.join()
+            t.join(timeout=300)
         return results
 
     def execute_sequential(self, steps: List[Dict[str, Any]], context: Dict[str, Any], results: Dict[str, StepResult] | None = None) -> Dict[str, StepResult]:
@@ -199,7 +199,7 @@ class ToolChainEngine:
                 result[0] = tool(context, **params)
             except Exception as e:
                 exc[0] = e
-        t = threading.Thread(target=target)
+        t = threading.Thread(target=target, daemon=True)
         t.start()
         t.join(timeout_seconds)
         if t.is_alive():

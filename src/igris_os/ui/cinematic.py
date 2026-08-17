@@ -4,11 +4,18 @@ import queue
 import sys
 import threading
 
+try:
+    import psutil
+    _HAS_PSUTIL = True
+except ImportError:
+    _HAS_PSUTIL = False
+
 from igris_os.application import (
     AssistantService, MissionDirector, MissionQueue, MissionRouter,
 )
 from igris_os.bootstrap import build_igris
-from igris_os.domain import Mission
+from igris_os.application.director import ContractualPlan
+from igris_os.domain import Mission, MissionBranch
 from igris_os.memory import MemoryStore
 from igris_os.ai.server import ensure_ollama_server
 from igris_os.retrieval import RepositoryContextStore
@@ -360,11 +367,12 @@ def run_cinematic_panel():
             self.update_metrics()
 
         def update_metrics(self):
+            if not _HAS_PSUTIL:
+                return
             try:
-                import psutil
                 cpu = round(psutil.cpu_percent(interval=None))
                 memory = round(psutil.virtual_memory().percent)
-            except ImportError:
+            except (OSError, psutil.Error):
                 return
             self.dials[0].set_value(cpu)
             self.dials[1].set_value(memory)
@@ -382,22 +390,42 @@ def run_cinematic_panel():
             self.chat.append(f"\n[USUARIO] {objective}")
             self.memory.remember(
                 "chat", {"role": "user", "text": objective}, verified=True)
-            plan = self.director.plan(Mission(objective))
+            self.plan_label.setText("MISIÓN: Planificando...")
+            self.plan_label.show()
+            self.status.setText("● Estado: Planificando")
+            self.status.setStyleSheet("color:#ffbe55;background:transparent;")
+            self.galaxy.set_busy(True)
+            self._pending_objective = objective
+            threading.Thread(
+                target=self._plan_in_background, args=(objective,),
+                daemon=True).start()
+
+        def _plan_in_background(self, objective: str):
+            try:
+                plan = self.director.plan(Mission(objective))
+            except Exception:
+                plan = ContractualPlan(
+                    mission_id="fallback",
+                    objective=objective,
+                    branch=MissionBranch.GENERAL,
+                    deliverables=(objective,))
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(0, lambda: self._on_plan_ready(plan, objective))
+
+        def _on_plan_ready(self, plan, objective: str):
             preview = plan.deliverables[:3] if plan.deliverables else (plan.objective,)
             self.plan_label.setText(
                 "MISIÓN: " + plan.branch.value.upper() + "\n" +
                 " → ".join(preview))
-            self.plan_label.show()
             self.status.setText("● Estado: Procesando")
             self.status.setStyleSheet("color:#ffbe55;background:transparent;")
-            self.galaxy.set_busy(True)
             action = self.router.route(objective, self.attachments)
             if action.kind == "capability":
                 answer = QMessageBox.StandardButton.Yes
                 if action.requires_confirmation:
                     answer = QMessageBox.question(
-                    self, "Confirmar misión",
-                    "IGRIS creará archivos en un workspace aislado. ¿Continuar?")
+                        self, "Confirmar misión",
+                        "IGRIS creará archivos en un workspace aislado. ¿Continuar?")
                 if answer != QMessageBox.StandardButton.Yes:
                     self.finish_message("Operación cancelada.", False)
                     return
