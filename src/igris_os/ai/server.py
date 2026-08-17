@@ -17,6 +17,8 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _BUNDLED = _PROJECT_ROOT / ".tools" / "ollama" / "ollama.exe"
 DEFAULT_ENDPOINT = "http://127.0.0.1:11434"
 
+_GLOBAL_SERVER: OllamaServer | None = None
+
 
 def bundled_ollama() -> Path | None:
     """Ruta al binario Ollama empaquetado en .tools/, o None si no existe."""
@@ -68,10 +70,12 @@ class OllamaServer:
             creationflags=flags,
         )
         deadline = time.monotonic() + wait
+        delay = 0.3
         while time.monotonic() < deadline:
             if self.is_running():
                 return True
-            time.sleep(0.3)
+            time.sleep(delay)
+            delay = min(delay * 2, 2.0)
         return False
 
     def stop(self) -> None:
@@ -95,12 +99,17 @@ def ensure_ollama_server(auto: bool = False) -> bool:
 
     Con ``auto=False`` (por defecto) solo comprueba; nunca arranca procesos,
     para que las llamadas desde tests o chequeos no lancen nada.
+
+    Mantiene una referencia global al servidor para evitar procesos huerfanos.
     """
+    global _GLOBAL_SERVER
     if is_ollama_running():
         return True
     if not auto:
         return False
-    return OllamaServer().start()
+    if _GLOBAL_SERVER is None:
+        _GLOBAL_SERVER = OllamaServer()
+    return _GLOBAL_SERVER.start()
 
 
 def server_status() -> dict:

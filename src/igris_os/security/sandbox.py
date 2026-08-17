@@ -34,6 +34,8 @@ CREATE_SUSPENDED = 0x00000004
 THREAD_SUSPEND_RESUME = 0x0002
 TH32CS_SNAPTHREAD = 0x00000004
 
+_kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
 
 @dataclass(frozen=True, slots=True)
 class SandboxRun:
@@ -118,7 +120,7 @@ class JobObjectSandbox:
             return SandboxRun(-1, "", "agoto el tiempo", True)
 
     def _create_job(self):
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32 = _kernel32
         handle = kernel32.CreateJobObjectW(None, None)
         if not handle:
             return None
@@ -147,13 +149,13 @@ class JobObjectSandbox:
 
     @staticmethod
     def _assign(job, process) -> bool:
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32 = _kernel32
         return bool(kernel32.AssignProcessToJobObject(
             wintypes.HANDLE(job), wintypes.HANDLE(process._handle)))
 
     @staticmethod
     def _resume(pid: int) -> None:
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32 = _kernel32
         tid = JobObjectSandbox._primary_thread_id(kernel32, pid)
         if not tid:
             return
@@ -184,12 +186,12 @@ class JobObjectSandbox:
 
     @staticmethod
     def _terminate(job) -> None:
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32 = _kernel32
         kernel32.TerminateJobObject(wintypes.HANDLE(job), 1)
 
     @staticmethod
     def _close(job) -> None:
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32 = _kernel32
         kernel32.CloseHandle(wintypes.HANDLE(job))
 
 

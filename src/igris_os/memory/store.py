@@ -1,4 +1,5 @@
 ﻿import json
+import os
 import sqlite3
 import tempfile
 import threading
@@ -6,9 +7,26 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
+def _is_onedrive_path(path: Path) -> bool:
+    """True si el path esta dentro de la carpeta OneDrive del usuario."""
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return False
+    onedrive = Path.home() / "OneDrive"
+    try:
+        resolved.relative_to(onedrive)
+        return True
+    except ValueError:
+        return False
+
+
 class MemoryStore:
     def __init__(self, path: Path) -> None:
-        if "OneDrive" in str(path):
+        env_override = os.environ.get("IGRIS_MEMORY_PATH")
+        if env_override:
+            path = Path(env_override) / "memories.db"
+        elif _is_onedrive_path(path):
             path = Path(tempfile.gettempdir()) / "igris_memory" / "memories.db"
         self.path = path
         self._write_lock = threading.Lock()
@@ -106,7 +124,16 @@ class MemoryStore:
                verified_only: bool = True) -> list[dict]:
         if limit < 1 or limit > 500:
             raise ValueError("Limite invalido")
-        return self.recall(category, verified_only=verified_only)[:limit]
+        query = "SELECT id,content,verified,created_at FROM memories WHERE category=?"
+        args: list = [category]
+        if verified_only:
+            query += " AND verified=1"
+        query += " ORDER BY id DESC LIMIT ?"
+        args.append(limit)
+        db = self._get_connection()
+        rows = db.execute(query, args).fetchall()
+        return [{"id": row[0], "content": json.loads(row[1]),
+                 "verified": bool(row[2]), "created_at": row[3]} for row in rows]
 
     def count(self, category: str, *, verified_only: bool = True) -> int:
         query = "SELECT COUNT(*) FROM memories WHERE category=?"

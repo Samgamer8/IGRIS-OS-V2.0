@@ -170,7 +170,6 @@ class OllamaClient:
         prompt_hash = self._hash_prompt(prompt)
         cached = self._cache.get(prompt_hash, model, 0.0)
         if cached is not None:
-            tokens = self._estimate_tokens(cached)
             return ModelReply(True, cached, model)
 
         body = json.dumps({"model": model, "prompt": prompt, "stream": False}).encode()
@@ -183,7 +182,6 @@ class OllamaClient:
             text = str(data.get("response", "")).strip()
             if text:
                 self._cache.put(prompt_hash, model, 0.0, text)
-            tokens = self._estimate_tokens(text)
             return ModelReply(bool(text), text, model,
                               "" if text else "Respuesta vacia")
         except (OSError, ValueError, urllib.error.URLError) as exc:

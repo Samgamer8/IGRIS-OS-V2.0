@@ -1,3 +1,4 @@
+import collections
 import re
 import shlex
 from dataclasses import dataclass, field
@@ -64,7 +65,7 @@ class ConversationTurn:
 
 @dataclass
 class ConversationState:
-    turns: List[ConversationTurn] = field(default_factory=list)
+    turns: collections.deque = field(default_factory=collections.deque)
     max_tool_rounds: int = 5
     summarize_every: int = 10
 
@@ -222,11 +223,12 @@ class AssistantService:
             return None
         summary = self.compressor.fallback_summarize(
             [{"role": t.role, "text": t.text} for t in old_turns])
-        self.state.turns = self.state.turns[len(old_turns):]
-        if self.state.turns and self.state.turns[0].role == "assistant":
-            self.state.turns[0].text = f"[Contexto resumido]\n{summary}\n\n" + self.state.turns[0].text
+        for _ in range(len(old_turns)):
+            self.turns.popleft()
+        if self.turns and self.turns[0].role == "assistant":
+            self.turns[0].text = f"[Contexto resumido]\n{summary}\n\n" + self.turns[0].text
         else:
-            self.state.turns.insert(0, ConversationTurn(role="system", text=f"[Contexto resumido]\n{summary}"))
+            self.turns.appendleft(ConversationTurn(role="system", text=f"[Contexto resumido]\n{summary}"))
         return summary
 
     def respond(self, objective: str,
@@ -279,8 +281,12 @@ class AssistantService:
         final_text = ""
         total_tool_rounds = 0
         current_text = ""
+        tool_outputs: list[str] = []
         for round_idx in range(self.state.max_tool_rounds):
-            reply = self.client.generate(prompt + "\nRespuesta de IGRIS:", model)
+            full_prompt = prompt + "\nRespuesta de IGRIS:"
+            if tool_outputs:
+                full_prompt += "\n" + "\n".join(tool_outputs)
+            reply = self.client.generate(full_prompt, model)
             if not reply.ok:
                 final_text = reply.error
                 break
@@ -295,7 +301,7 @@ class AssistantService:
             if self.on_tool_call:
                 self.on_tool_call(tool_name, tool_args, output, True)
             total_tool_rounds += 1
-            prompt += f"\n[HERRAMIENTA {tool_name} resultado]: {output}\nObserva el resultado y continua."
+            tool_outputs.append(f"[HERRAMIENTA {tool_name} resultado]: {output}\nObserva el resultado y continua.")
         if not final_text:
             final_text = current_text or "Sin respuesta."
         self.state.add_turn("assistant", final_text)

@@ -80,10 +80,9 @@ class RuntimeProbe:
         if not self.bundle.is_dir():
             return None
         for pattern in patterns:
-            matches = sorted(path for path in self.bundle.rglob(pattern)
-                             if path.is_file())
-            if matches:
-                return matches[0]
+            match = next((p for p in self.bundle.rglob(pattern) if p.is_file()), None)
+            if match:
+                return match
         return None
 
     def summary(self) -> str:

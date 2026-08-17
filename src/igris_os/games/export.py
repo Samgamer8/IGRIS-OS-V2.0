@@ -157,13 +157,17 @@ class GodotExporter:
             process = subprocess.Popen([str(target)])
         except OSError as exc:
             return False, f"no arranca: {exc}"
-        time.sleep(seconds)
-        code = process.poll()
-        if code is not None:
-            return False, f"termino al arrancar (codigo {code})"
-        process.terminate()
         try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
+            time.sleep(seconds)
+            code = process.poll()
+            if code is not None:
+                return False, f"termino al arrancar (codigo {code})"
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+            return True, "arranca y permanece estable"
+        except Exception:
             process.kill()
-        return True, "arranca y permanece estable"
+            raise

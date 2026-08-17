@@ -9,13 +9,14 @@ from typing import Any
 
 
 class ContextCompressor:
-    def __init__(self, ollama_url: str = "http://localhost:11434") -> None:
+    def __init__(self, ollama_url: str = "http://127.0.0.1:11434") -> None:
+        if not ollama_url.startswith(("http://127.0.0.1", "http://localhost")):
+            raise ValueError("Ollama debe usar loopback")
         self.ollama_url = ollama_url.rstrip("/")
         self._ollama_available: bool | None = None
 
     def estimate_tokens(self, text: str) -> int:
-        spanish = re.findall(r"[a-zA-ZáéíóúñÁÉÍÓÚÑüÜ]", text)
-        ratio = 2.0 if spanish else 4.0
+        ratio = 2.0 if re.search(r"[áéíóúñÁÉÍÓÚÑüÜ]", text) else 4.0
         return max(1, int(len(text) / ratio))
 
     def prune_oldest(self, conversation: list[dict], keep_last: int = 10) -> list[dict]:

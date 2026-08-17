@@ -53,6 +53,9 @@ class WindowsVoice:
         self._resident = None
         self._current_voice_name = None
 
+    def __del__(self):
+        self.close()
+
     def _ensure_resident(self):
         if self._resident is None or self._resident.poll() is not None:
             self._resident = subprocess.Popen(
@@ -89,10 +92,14 @@ class WindowsVoice:
             "$p=$args[0];$s=New-Object Media.SoundPlayer $p;"
             "$s.PlaySync()")
         try:
-            subprocess.Popen(
+            process = subprocess.Popen(
                 ["powershell.exe", "-NoProfile", "-Command", script,
                  str(path.resolve())], stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL)
+            try:
+                process.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                process.kill()
             return True
         except OSError:
             return False
