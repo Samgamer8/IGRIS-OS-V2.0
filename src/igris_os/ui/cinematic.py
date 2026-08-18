@@ -11,7 +11,7 @@ except ImportError:
     _HAS_PSUTIL = False
 
 from igris_os.application import (
-    AssistantService, MissionDirector, MissionQueue, MissionRouter,
+    AssistantService, MissionDirector, MissionQueue,
 )
 from igris_os.bootstrap import build_igris
 from igris_os.application.director import ContractualPlan
@@ -206,10 +206,9 @@ def run_cinematic_panel():
                 self.setWindowIcon(QIcon(str(icon)))
             self.assistant = AssistantService()
             self.director = MissionDirector()
-            self.router = MissionRouter()
             self.runtime = runtime_root()
             self.kernel = build_igris(self.runtime)
-            self.ai_server_running = ensure_ollama_server(auto=True)
+            self.ai_server_running = False
             self.context_store = RepositoryContextStore(self.runtime)
             self.memory = MemoryStore(self.runtime / "memory" / "chat.db")
             self.mission_queue = MissionQueue(self.runtime / "missions_queue.json")
@@ -235,6 +234,7 @@ def run_cinematic_panel():
             self.metrics_timer.timeout.connect(self.update_metrics)
             self.metrics_timer.start(1500)
             QTimer.singleShot(0, self.dispatch_next)
+            QTimer.singleShot(100, self._probe_server)
 
         def build_visuals(self, QFrame, QLabel, QPushButton, QTextEdit,
                           PromptEdit, Dial, QFont, QPixmap, Qt):
@@ -388,8 +388,11 @@ def run_cinematic_panel():
             self.command_count += 1
             self.dials[5].set_value(min(100, self.command_count))
             self.chat.append(f"\n[USUARIO] {objective}")
-            self.memory.remember(
-                "chat", {"role": "user", "text": objective}, verified=True)
+            try:
+                self.memory.remember(
+                    "chat", {"role": "user", "text": objective}, verified=True)
+            except Exception:
+                pass
             if self._is_greeting(objective):
                 self.finish_message("Aqui estoy. Que necesitas?", True)
                 return
@@ -398,7 +401,6 @@ def run_cinematic_panel():
             self.status.setText("● Estado: Planificando")
             self.status.setStyleSheet("color:#ffbe55;background:transparent;")
             self.galaxy.set_busy(True)
-            self._pending_objective = objective
             threading.Thread(
                 target=self._plan_in_background, args=(objective,),
                 daemon=True).start()
@@ -432,25 +434,29 @@ def run_cinematic_panel():
                 " → ".join(preview))
             self.status.setText("● Estado: Procesando")
             self.status.setStyleSheet("color:#ffbe55;background:transparent;")
-            action = self._route_with_plan(plan, objective)
-            if action.kind == "capability":
-                answer = QMessageBox.StandardButton.Yes
-                if action.requires_confirmation:
-                    answer = QMessageBox.question(
-                        self, "Confirmar misión",
-                        "IGRIS creará archivos en un workspace aislado. ¿Continuar?")
-                if answer != QMessageBox.StandardButton.Yes:
-                    self.finish_message("Operación cancelada.", False)
-                    return
-                payload = dict(action.payload or {})
-                payload["__approval"] = self.kernel.issue_approval(
-                    objective, action.capability)
-                job = self.mission_queue.enqueue(
-                    objective, "capability", action.capability, payload)
-            else:
-                job = self.mission_queue.enqueue(objective, "chat")
-            pending = self.mission_queue.summary()["pending"]
-            self.chat.append(f"[COLA] Misión {job.id[:8]} registrada · pendientes: {pending}")
+            try:
+                action = self._route_with_plan(plan, objective)
+                if action.kind == "capability":
+                    answer = QMessageBox.StandardButton.Yes
+                    if action.requires_confirmation:
+                        answer = QMessageBox.question(
+                            self, "Confirmar misión",
+                            "IGRIS creará archivos en un workspace aislado. ¿Continuar?")
+                    if answer != QMessageBox.StandardButton.Yes:
+                        self.finish_message("Operación cancelada.", False)
+                        return
+                    payload = dict(action.payload or {})
+                    payload["__approval"] = self.kernel.issue_approval(
+                        objective, action.capability)
+                    job = self.mission_queue.enqueue(
+                        objective, "capability", action.capability, payload)
+                else:
+                    job = self.mission_queue.enqueue(objective, "chat")
+                pending = self.mission_queue.summary()["pending"]
+                self.chat.append(f"[COLA] Misión {job.id[:8]} registrada · pendientes: {pending}")
+            except Exception as exc:
+                self.finish_message(f"Error interno: {exc}", False)
+                return
             self.dispatch_next()
 
         def _route_with_plan(self, plan, objective: str):
@@ -503,7 +509,7 @@ def run_cinematic_panel():
             if source and any(word in low for word in (
                     "convierte", "transcodifica", "a mp4")):
                 return RoutedAction("capability", "multimedia.transcode",
-                                    {"source": source, "output": "video_convertido.mp3"}, True)
+                                    {"source": source, "output": "video_convertido.mp4"}, True)
             if source and any(phrase in low for phrase in (
                     "edita este video", "procesa este video", "prepara este video",
                     "edita el video", "procesa el video")):
@@ -550,15 +556,18 @@ def run_cinematic_panel():
             return RoutedAction("chat")
 
         def dispatch_next(self):
-            if self.active_job is not None:
-                return
-            job = self.mission_queue.next()
-            if job is None:
-                return
-            self.active_job = job
-            self.status.setText("● Estado: Ejecutando " + job.id[:8])
-            self.galaxy.set_busy(True)
-            threading.Thread(target=self.run_job, args=(job,), daemon=True).start()
+            try:
+                if self.active_job is not None:
+                    return
+                job = self.mission_queue.next()
+                if job is None:
+                    return
+                self.active_job = job
+                self.status.setText("● Estado: Ejecutando " + job.id[:8])
+                self.galaxy.set_busy(True)
+                threading.Thread(target=self.run_job, args=(job,), daemon=True).start()
+            except Exception:
+                pass
 
         def run_job(self, job):
             def report_progress(percent, message):
@@ -568,15 +577,21 @@ def run_cinematic_panel():
                 except (KeyError, ValueError):
                     pass
                 self.progress_events.put((job.id, percent, message))
-            if job.kind == "capability":
-                reply = self.kernel.execute(
-                    Mission(job.objective), job.capability, job.payload,
-                    approval=job.payload.get("__approval"),
-                    on_progress=report_progress)
-                self.remember_repository_context(reply, job)
-            else:
-                context = self.memory_context() + self.semantic_context(job.objective)
-                reply = self.assistant.respond(job.objective, context)
+            try:
+                if job.kind == "capability":
+                    reply = self.kernel.execute(
+                        Mission(job.objective), job.capability, job.payload,
+                        approval=job.payload.get("__approval"),
+                        on_progress=report_progress)
+                    self.remember_repository_context(reply, job)
+                else:
+                    context = self.memory_context() + self.semantic_context(job.objective)
+                    reply = self.assistant.respond(job.objective, context)
+            except Exception as exc:
+                from igris_os.application.assistant import AssistantReply
+                reply = AssistantReply(
+                    text=f"Error ejecutando misión: {exc}",
+                    ok=False, model="", data={})
             self.replies.put((job.id, reply))
 
         def tick(self):
@@ -607,28 +622,32 @@ def run_cinematic_panel():
             model = getattr(reply, "model", "")
             self.chat.append(f"\n[IGRIS{(' · ' + model) if model else ''}] {text}")
             data = getattr(reply, "data", {})
-            if self.voice_enabled:
-                threading.Thread(
-                    target=self.voice_engine.speak, args=(text,),
-                    daemon=True).start()
-            self.memory.remember(
-                "chat", {"role": "igris", "text": text,
-                         "ok": bool(getattr(reply, "ok", False))}, verified=True)
-            if data and self.active_job is not None:
-                technical = self.technical_summary(
-                    self.active_job.objective, self.active_job.capability,
-                    dict(data))
-                if technical:
-                    self.memory.remember(
-                        "technical", technical, verified=ok)
-            if data:
-                rendered = self.render_result(dict(data))
-                if rendered:
-                    self.chat.append(rendered)
-            self.mission_queue.finish(job_id, ok, text)
-            self.active_job = None
-            self.finish_message("", ok)
-            self.dispatch_next()
+            try:
+                if self.voice_enabled:
+                    threading.Thread(
+                        target=self.voice_engine.speak, args=(text,),
+                        daemon=True).start()
+                self.memory.remember(
+                    "chat", {"role": "igris", "text": text,
+                             "ok": bool(getattr(reply, "ok", False))}, verified=True)
+                if data and self.active_job is not None:
+                    technical = self.technical_summary(
+                        self.active_job.objective, self.active_job.capability,
+                        dict(data))
+                    if technical:
+                        self.memory.remember(
+                            "technical", technical, verified=ok)
+                if data:
+                    rendered = self.render_result(dict(data))
+                    if rendered:
+                        self.chat.append(rendered)
+                self.mission_queue.finish(job_id, ok, text)
+            except Exception:
+                pass
+            finally:
+                self.active_job = None
+                self.finish_message("", ok)
+                self.dispatch_next()
 
         def render_result(self, data):
             return format_result(data)
@@ -682,6 +701,11 @@ def run_cinematic_panel():
                 f"color:{color};background:transparent;")
             self.update_metrics()
 
+        def _probe_server(self):
+            def _do():
+                self.ai_server_running = ensure_ollama_server(auto=True)
+            threading.Thread(target=_do, daemon=True).start()
+
         def show_military(self):
             self.plan_label.setVisible(not self.plan_label.isVisible())
 
@@ -703,7 +727,9 @@ def run_cinematic_panel():
             self.chat.append("\n[VOZ] Voz local " + state + ".")
             sample = asset_path("igris_voice_identity.wav")
             if self.voice_enabled and sample:
-                self.voice_engine.play_sample(sample)
+                threading.Thread(
+                    target=self.voice_engine.play_sample,
+                    args=(sample,), daemon=True).start()
 
         def listen_voice(self):
             self.mic.setEnabled(False)
@@ -728,20 +754,23 @@ def run_cinematic_panel():
                 f"Misiones pendientes canceladas: {cancelled}.")
 
         def show_memory(self):
-            rows = list(reversed(self.memory.recent("chat", limit=6)))
-            if not rows:
-                self.chat.append("\n[MEMORIA] Sin recuerdos verificados.")
-                return
-            summary = " | ".join(
-                row["content"].get("role", "?") + ": " +
-                row["content"].get("text", "")[:100] for row in rows)
-            self.chat.append("\n[MEMORIA] " + summary)
-            technical_count = self.memory.count("technical")
-            if technical_count:
-                latest = self.memory.recent("technical", limit=1)[0]["content"]
-                self.chat.append(
-                    f"\n[MEMORIA TÉCNICA] {technical_count} evidencias · última: "
-                    + latest.get("objective", "")[:120])
+            try:
+                rows = list(reversed(self.memory.recent("chat", limit=6)))
+                if not rows:
+                    self.chat.append("\n[MEMORIA] Sin recuerdos verificados.")
+                    return
+                summary = " | ".join(
+                    row["content"].get("role", "?") + ": " +
+                    row["content"].get("text", "")[:100] for row in rows)
+                self.chat.append("\n[MEMORIA] " + summary)
+                technical_count = self.memory.count("technical")
+                if technical_count:
+                    latest = self.memory.recent("technical", limit=1)[0]["content"]
+                    self.chat.append(
+                        f"\n[MEMORIA TÉCNICA] {technical_count} evidencias · última: "
+                        + latest.get("objective", "")[:120])
+            except Exception:
+                self.chat.append("\n[MEMORIA] Error leyendo memoria.")
 
         def remember_repository_context(self, reply, job):
             data = getattr(reply, "data", {})

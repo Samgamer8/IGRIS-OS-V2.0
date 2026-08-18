@@ -4,6 +4,9 @@ from pathlib import Path
 
 from igris_os.ai import OllamaClient
 from igris_os.application import CapabilityRegistry, SpecialistCoordinator
+from igris_os.delegation import (DelegatedSpecialist, DelegatedTask,
+                                  OllamaSpecialist,
+                                  build_resilient_specialist)
 from igris_os.domain import ActionRisk, CapabilitySpec, ExecutionResult
 from igris_os.evaluation import IndependentVerifier
 from igris_os.games import GodotExporter, GodotProjectFactory, GameVerifier
@@ -76,6 +79,10 @@ def register_creation_capabilities(registry: CapabilityRegistry) -> None:
         CapabilitySpec("delivery.verify",
                        "Revision independiente de una entrega con segundo modelo",
                        ActionRisk.READ_ONLY), _verify_delivery)
+    registry.register(
+        CapabilitySpec("programming.delegate",
+                       "Delega una tarea a un especialista externo (Claude Code u Ollama local) con auto-reparacion",
+                       ActionRisk.WRITE_WORKSPACE, True), _delegate)
     for name, description, handler in (
         ("image.resize", "Redimensiona una imagen", _resize_image),
         ("multimedia.extract_audio", "Extrae audio de un archivo", _extract_audio),
@@ -153,6 +160,69 @@ def _develop_autonomous(payload):
         review_score=result.review.score if result.review else 0.0,
         attempts=result.attempts,
     )
+
+
+def _as_tuple(value) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        return (value,)
+    if isinstance(value, (list, tuple)):
+        return tuple(str(item) for item in value)
+    return ()
+
+
+def _delegate(payload):
+    objective = str(payload.get("objective", "")).strip()
+    workspace = Path(payload["workspace"])
+    backend = str(payload.get("backend", "auto")).strip().lower()
+    local_model = str(payload.get("model", "qwen2.5-coder:7b"))
+
+    if backend == "claude":
+        try:
+            specialist = DelegatedSpecialist()
+        except FileNotFoundError as exc:
+            return ExecutionResult.failure(str(exc), "CLAUDE_NOT_AVAILABLE")
+        task_model = str(payload.get("model", ""))
+    elif backend == "ollama":
+        specialist = OllamaSpecialist(model=local_model)
+        task_model = ""
+    else:  # auto: Claude primero, Ollama local como respaldo
+        specialist = build_resilient_specialist(local_model=local_model)
+        task_model = str(payload.get("model", ""))
+
+    task = DelegatedTask(
+        objective=objective,
+        workspace=workspace,
+        acceptance=_as_tuple(payload.get("acceptance")),
+        constraints=_as_tuple(payload.get("constraints")),
+        max_turns=int(payload.get("max_turns", 20)),
+        timeout_seconds=int(payload.get("timeout", 600)),
+        model=task_model,
+        verify_command=_as_tuple(payload.get("verify_command")),
+        target_files=_as_tuple(payload.get("target_files")),
+    )
+    result = specialist.run(
+        task, max_attempts=max(1, int(payload.get("max_attempts", 3))))
+    detail = result.stderr[-500:] if result.stderr else ""
+    common = {"changed_files": result.changed_files,
+              "sandboxed": result.sandboxed,
+              "timed_out": result.timed_out,
+              "containment_violations": result.containment_violations,
+              "attempts": result.attempts,
+              "verification_history": list(result.verification_history)}
+    if not result.ok:
+        return ExecutionResult(
+            ok=False, code="DELEGATION_FAILED",
+            message=result.message + (" · " + detail if detail else ""),
+            data=common)
+    return ExecutionResult.success(
+        result.message,
+        changed_files=result.changed_files,
+        verified=result.verified,
+        sandboxed=result.sandboxed,
+        containment_violations=result.containment_violations,
+        attempts=result.attempts)
 
 
 def _verify_delivery(payload):

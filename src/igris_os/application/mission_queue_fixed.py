@@ -1,14 +1,11 @@
 """Cola de misiones con recuperación atómica y validación de tamaño."""
 import json
-import logging
 import threading
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 import tempfile
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)

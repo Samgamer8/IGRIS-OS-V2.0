@@ -29,6 +29,7 @@ class WorkflowGraph:
         in_degree = {n: 0 for n in self.nodes}
         for src, targets in self.edges.items():
             for t in targets:
+                in_degree.setdefault(t, 0)
                 in_degree[t] += 1
         levels = []
         remaining = dict(in_degree)
@@ -49,14 +50,17 @@ class WorkflowGraph:
             errors = []
             lock = Lock()
 
-            def wrap(node):
+            def wrap(node, snapshot):
                 try:
-                    results[node.id] = node.handler(results)
+                    results[node.id] = node.handler(snapshot)
                 except Exception as e:
                     with lock:
                         errors.append(e)
 
-            threads = [Thread(target=wrap, args=(self.nodes[n],)) for n in level]
+            threads = [
+                Thread(target=wrap, args=(self.nodes[n], dict(results)))
+                for n in level
+            ]
             for t in threads:
                 t.start()
             for t in threads:

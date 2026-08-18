@@ -18,6 +18,7 @@ class ModelReply:
 # Module-level cached backend detection (probes once, shared by all instances)
 _backend_probed = False
 _detected_backend: str = "ollama"
+_detection_lock = threading.Lock()
 _detected_endpoint: str = "http://127.0.0.1:11434"
 
 
@@ -79,33 +80,34 @@ class OllamaClient:
 
     def _detect_backend(self) -> None:
         global _backend_probed, _detected_backend, _detected_endpoint
-        if not _backend_probed:
-            opener = self._build_opener()
-            # Try Ollama first
-            try:
-                req = urllib.request.Request("http://127.0.0.1:11434/api/tags")
-                with opener.open(req, timeout=1) as resp:
-                    if resp.status == 200:
-                        _detected_backend = "ollama"
-                        _detected_endpoint = "http://127.0.0.1:11434"
-                        _backend_probed = True
-            except (OSError, urllib.error.URLError):
+        with _detection_lock:
+            if _backend_probed:
                 pass
-            # Try LM Studio
-            if not _backend_probed:
+            else:
+                opener = self._build_opener()
                 try:
-                    req = urllib.request.Request("http://127.0.0.1:1234/v1/models")
+                    req = urllib.request.Request("http://127.0.0.1:11434/api/tags")
                     with opener.open(req, timeout=1) as resp:
                         if resp.status == 200:
-                            _detected_backend = "lmstudio"
-                            _detected_endpoint = "http://127.0.0.1:1234"
+                            _detected_backend = "ollama"
+                            _detected_endpoint = "http://127.0.0.1:11434"
                             _backend_probed = True
                 except (OSError, urllib.error.URLError):
                     pass
-            if not _backend_probed:
-                _detected_backend = "ollama"
-                _detected_endpoint = "http://127.0.0.1:11434"
-                _backend_probed = True
+                if not _backend_probed:
+                    try:
+                        req = urllib.request.Request("http://127.0.0.1:1234/v1/models")
+                        with opener.open(req, timeout=1) as resp:
+                            if resp.status == 200:
+                                _detected_backend = "lmstudio"
+                                _detected_endpoint = "http://127.0.0.1:1234"
+                                _backend_probed = True
+                    except (OSError, urllib.error.URLError):
+                        pass
+                if not _backend_probed:
+                    _detected_backend = "ollama"
+                    _detected_endpoint = "http://127.0.0.1:11434"
+                    _backend_probed = True
         self.endpoint = _detected_endpoint
         self._backend = _detected_backend
 

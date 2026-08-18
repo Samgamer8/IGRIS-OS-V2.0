@@ -83,3 +83,4 @@ class MissionRunner:
             self.mission_queue.finish(job.id, False, str(exc))
         finally:
             self.active_job = None
+            self.dispatch_next()

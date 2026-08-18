@@ -84,6 +84,7 @@ class JobObjectSandbox:
         try:
             process = subprocess.Popen(
                 command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                stdin=subprocess.DEVNULL,
                 text=True, cwd=cwd, env=env, creationflags=creationflags)
         except OSError as exc:
             if job:
@@ -113,6 +114,7 @@ class JobObjectSandbox:
     def _plain_run(command, timeout, cwd, env) -> SandboxRun:
         try:
             run = subprocess.run(command, capture_output=True, text=True,
+                                 stdin=subprocess.DEVNULL,
                                  timeout=timeout, cwd=cwd, env=env)
             return SandboxRun(run.returncode, run.stdout or "",
                               run.stderr or "")

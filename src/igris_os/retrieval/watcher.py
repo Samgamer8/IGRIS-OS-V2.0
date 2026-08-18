@@ -34,6 +34,8 @@ class RepositoryWatcher:
 
         def flush():
             nonlocal changed_at
+            if self._stop.is_set():
+                return
             if pending:
                 callback(list(pending))
                 pending.clear()

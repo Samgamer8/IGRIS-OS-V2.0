@@ -1,16 +1,13 @@
-﻿"""MemoryStore con validación de tamaño, paginación y rate limiting."""
+"""MemoryStore con validación de tamaño, paginación y rate limiting."""
 import json
-import logging
 import os
 import sqlite3
 import tempfile
 import threading
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
-
-logger = logging.getLogger(__name__)
+import time
 
 
 def _is_onedrive_path(path: Path) -> bool:
@@ -52,13 +49,6 @@ class MemoryStore:
                 id INTEGER PRIMARY KEY, category TEXT NOT NULL, content TEXT NOT NULL,
                 verified INTEGER NOT NULL, created_at TEXT NOT NULL,
                 size_bytes INTEGER NOT NULL DEFAULT 0)""")
-            # Migracion de bases creadas con el esquema anterior: si falta la
-            # columna size_bytes (anadida despues), agregarla antes de indexar.
-            columns = {row[1] for row in db.execute("PRAGMA table_info(memories)")}
-            if "size_bytes" not in columns:
-                db.execute(
-                    "ALTER TABLE memories ADD COLUMN size_bytes INTEGER NOT NULL DEFAULT 0"
-                )
             db.execute("""CREATE INDEX IF NOT EXISTS idx_mem_cat_ver ON memories(category, verified, id DESC)""")
             db.execute("""CREATE INDEX IF NOT EXISTS idx_mem_size ON memories(size_bytes)""")
     
@@ -89,10 +79,9 @@ class MemoryStore:
         return conn
     
     def _get_connection(self):
-        with self._write_lock:
-            if self._connection is None:
-                self._connection = self._connect()
-            return self._connection
+        if self._connection is None:
+            self._connection = self._connect()
+        return self._connection
     
     def close(self):
         if self._connection is not None:

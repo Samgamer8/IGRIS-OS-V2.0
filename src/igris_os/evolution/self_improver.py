@@ -1,4 +1,5 @@
 ﻿from __future__ import annotations
+import ast
 import re
 import shutil
 from pathlib import Path
@@ -24,7 +25,7 @@ class SelfImprover:
         return ""
     def scan_weaknesses(self) -> list[dict[str, Any]]:
         weaknesses: list[dict[str, Any]] = []
-        for path in self.src_root.glob("*.py"):
+        for path in self.src_root.rglob("*.py"):
             text = path.read_text(encoding="utf-8")
             lines = text.splitlines()
             for m in re.finditer(r"^def\s+(\w+)\s*\([^)]*\):", text, re.M):
@@ -70,9 +71,17 @@ class SelfImprover:
             replacement = code.group(1).strip() if code else improvement
         else:
             replacement = improvement
-        new_text, count = re.subn(r"def\s+\w+\s*\([^)]*\):", replacement, text, count=1)
-        if count == 0:
+        pattern = r"(def\s+\w+\s*\([^)]*\):[\s\S]*?)(?=\ndef\s|\nclass\s|\Z)"
+        match = re.search(pattern, text, re.M)
+        if match:
+            new_text = text[:match.start()] + replacement + text[match.end():]
+        else:
             new_text = text + "\n" + replacement
+        try:
+            ast.parse(new_text)
+        except SyntaxError:
+            shutil.copy2(backup, file_path)
+            return False
         file_path.write_text(new_text, encoding="utf-8")
         return True
     def auto_refactor(self) -> list[dict[str, Any]]:
