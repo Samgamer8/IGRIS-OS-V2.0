@@ -197,29 +197,26 @@ def run_cinematic_panel():
         def __init__(self):
             super().__init__()
             self.setWindowTitle("IGRIS OS — Modo Militar")
-            # Arranque cómodo en pantallas 1080p; el lienzo conserva su
-            # proporción y puede ampliarse manualmente cuando se necesite.
             self.resize(1440, 810)
             self.setMinimumSize(1100, 619)
             icon = asset_path("igris_icon_v2.ico")
             if icon:
                 self.setWindowIcon(QIcon(str(icon)))
-            self.assistant = AssistantService()
-            self.director = MissionDirector()
             self.runtime = runtime_root()
-            self.kernel = build_igris(self.runtime)
-            self.ai_server_running = False
-            self.context_store = RepositoryContextStore(self.runtime)
-            self.memory = MemoryStore(self.runtime / "memory" / "chat.db")
-            self.mission_queue = MissionQueue(self.runtime / "missions_queue.json")
             self.active_job = None
-            self.voice_engine = WindowsVoice()
             self.voice_enabled = True
             self.voice_inputs = queue.Queue()
             self.replies = queue.Queue()
             self.progress_events = queue.Queue()
             self.command_count = 0
             self.attachments = []
+            self.assistant = None
+            self.director = None
+            self.kernel = None
+            self.context_store = None
+            self.memory = None
+            self.mission_queue = None
+            self.voice_engine = None
             self.canvas = Canvas()
             self.setCentralWidget(self.canvas)
             self.canvas.setAcceptDrops(True)
@@ -233,7 +230,7 @@ def run_cinematic_panel():
             self.metrics_timer = QTimer(self)
             self.metrics_timer.timeout.connect(self.update_metrics)
             self.metrics_timer.start(1500)
-            QTimer.singleShot(0, self.dispatch_next)
+            QTimer.singleShot(0, self._init_services)
             QTimer.singleShot(100, self._probe_server)
 
         def build_visuals(self, QFrame, QLabel, QPushButton, QTextEdit,
@@ -388,13 +385,17 @@ def run_cinematic_panel():
             self.command_count += 1
             self.dials[5].set_value(min(100, self.command_count))
             self.chat.append(f"\n[USUARIO] {objective}")
-            try:
-                self.memory.remember(
-                    "chat", {"role": "user", "text": objective}, verified=True)
-            except Exception:
-                pass
+            if self.memory is not None:
+                try:
+                    self.memory.remember(
+                        "chat", {"role": "user", "text": objective}, verified=True)
+                except Exception:
+                    pass
             if self._is_greeting(objective):
                 self.finish_message("Aqui estoy. Que necesitas?", True)
+                return
+            if self.director is None or self.kernel is None:
+                self.finish_message("Servicios aún inicializando, intenta de nuevo en unos segundos.", False)
                 return
             self.plan_label.setText("MISIÓN: Planificando...")
             self.plan_label.show()
@@ -557,7 +558,7 @@ def run_cinematic_panel():
 
         def dispatch_next(self):
             try:
-                if self.active_job is not None:
+                if self.active_job is not None or self.mission_queue is None:
                     return
                 job = self.mission_queue.next()
                 if job is None:
@@ -623,14 +624,15 @@ def run_cinematic_panel():
             self.chat.append(f"\n[IGRIS{(' · ' + model) if model else ''}] {text}")
             data = getattr(reply, "data", {})
             try:
-                if self.voice_enabled:
+                if self.voice_enabled and self.voice_engine is not None:
                     threading.Thread(
                         target=self.voice_engine.speak, args=(text,),
                         daemon=True).start()
-                self.memory.remember(
-                    "chat", {"role": "igris", "text": text,
-                             "ok": bool(getattr(reply, "ok", False))}, verified=True)
-                if data and self.active_job is not None:
+                if self.memory is not None:
+                    self.memory.remember(
+                        "chat", {"role": "igris", "text": text,
+                                 "ok": bool(getattr(reply, "ok", False))}, verified=True)
+                if data and self.active_job is not None and self.memory is not None:
                     technical = self.technical_summary(
                         self.active_job.objective, self.active_job.capability,
                         dict(data))
@@ -641,7 +643,8 @@ def run_cinematic_panel():
                     rendered = self.render_result(dict(data))
                     if rendered:
                         self.chat.append(rendered)
-                self.mission_queue.finish(job_id, ok, text)
+                if self.mission_queue is not None:
+                    self.mission_queue.finish(job_id, ok, text)
             except Exception:
                 pass
             finally:
@@ -706,6 +709,19 @@ def run_cinematic_panel():
                 self.ai_server_running = ensure_ollama_server(auto=True)
             threading.Thread(target=_do, daemon=True).start()
 
+        def _init_services(self):
+            try:
+                self.assistant = AssistantService()
+                self.director = MissionDirector()
+                self.kernel = build_igris(self.runtime)
+                self.context_store = RepositoryContextStore(self.runtime)
+                self.memory = MemoryStore(self.runtime / "memory" / "chat.db")
+                self.mission_queue = MissionQueue(self.runtime / "missions_queue.json")
+                self.voice_engine = WindowsVoice()
+            except Exception as exc:
+                self.chat.append(f"\n[SISTEMA] Error inicializando servicios: {exc}")
+            self.dispatch_next()
+
         def show_military(self):
             self.plan_label.setVisible(not self.plan_label.isVisible())
 
@@ -725,6 +741,8 @@ def run_cinematic_panel():
             self.dials[4].set_value(100 if self.voice_enabled else 0)
             state = "activada" if self.voice_enabled else "desactivada"
             self.chat.append("\n[VOZ] Voz local " + state + ".")
+            if self.voice_engine is None:
+                return
             sample = asset_path("igris_voice_identity.wav")
             if self.voice_enabled and sample:
                 threading.Thread(
@@ -732,6 +750,8 @@ def run_cinematic_panel():
                     args=(sample,), daemon=True).start()
 
         def listen_voice(self):
+            if self.voice_engine is None:
+                return
             self.mic.setEnabled(False)
             self.chat.append("\n[VOZ] Escuchando...")
             threading.Thread(
@@ -744,7 +764,7 @@ def run_cinematic_panel():
                 "reparar y entregar evidencia.")
 
         def reset_view(self):
-            cancelled = self.mission_queue.cancel_pending()
+            cancelled = self.mission_queue.cancel_pending() if self.mission_queue else 0
             self.chat.clear()
             self.attachments.clear()
             self.plan_label.hide()
@@ -754,6 +774,9 @@ def run_cinematic_panel():
                 f"Misiones pendientes canceladas: {cancelled}.")
 
         def show_memory(self):
+            if self.memory is None:
+                self.chat.append("\n[MEMORIA] Memoria aún no disponible.")
+                return
             try:
                 rows = list(reversed(self.memory.recent("chat", limit=6)))
                 if not rows:
@@ -773,6 +796,8 @@ def run_cinematic_panel():
                 self.chat.append("\n[MEMORIA] Error leyendo memoria.")
 
         def remember_repository_context(self, reply, job):
+            if self.context_store is None:
+                return
             data = getattr(reply, "data", {})
             repository = data.get("repository") or {}
             if getattr(reply, "ok", False) and repository.get("records"):
@@ -781,6 +806,8 @@ def run_cinematic_panel():
                     self.context_store.remember(root, repository["records"])
 
         def memory_context(self):
+            if self.memory is None:
+                return ()
             rows = list(reversed(self.memory.recent("chat", limit=8)))
             context = [
                 row["content"].get("role", "?") + ": " +
@@ -793,6 +820,8 @@ def run_cinematic_panel():
             return tuple(context)
 
         def semantic_context(self, objective):
+            if self.context_store is None:
+                return ()
             return tuple(
                 "archivo relevante: " + str(item["path"]) +
                 " — " + str(item["excerpt"])[:250]

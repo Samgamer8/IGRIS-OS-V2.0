@@ -40,6 +40,7 @@ class MemoryStore:
             path = Path(tempfile.gettempdir()) / "igris_memory" / "memories.db"
         self.path = path
         self._write_lock = threading.Lock()
+        self._connect_lock = threading.Lock()
         self._connection = None
         self._delete_count_since_vacuum = 0
         self._vacuum_threshold = 100
@@ -89,7 +90,7 @@ class MemoryStore:
         return conn
     
     def _get_connection(self):
-        with self._write_lock:
+        with self._connect_lock:
             if self._connection is None:
                 self._connection = self._connect()
             return self._connection

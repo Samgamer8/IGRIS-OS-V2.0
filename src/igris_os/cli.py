@@ -24,10 +24,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source", action="append", default=[])
     parser.add_argument("--output", default="runtime/inventory/sources.json")
     args = parser.parse_args(argv)
-    kernel = build_igris()
     if args.command == "panel":
         from igris_os.ui import run_panel
         return run_panel()
+    kernel = build_igris()
     if args.command == "probe":
         probe = RuntimeProbe(Path.cwd())
         statuses = probe.probe()
