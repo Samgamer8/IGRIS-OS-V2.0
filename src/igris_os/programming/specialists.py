@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Sequence
 
 from igris_os.ai import ModelReply, OllamaClient
+from igris_os.ai.multi_provider import MultiProviderRouter, GenerationRequest, GenerationResponse, ProviderRank
 
 
 class SpecialistRole(str, Enum):
@@ -104,8 +106,10 @@ class SpecialistRegistry:
         ),
     }
 
-    def __init__(self, client: OllamaClient | None = None) -> None:
+    def __init__(self, client: OllamaClient | None = None, use_multi_provider: bool = False) -> None:
         self.client = client or OllamaClient()
+        self.use_multi_provider = use_multi_provider
+        self.multi_provider = MultiProviderRouter() if use_multi_provider else None
 
     def available_models(self) -> Sequence[str]:
         try:
@@ -115,6 +119,42 @@ class SpecialistRegistry:
 
     def execute(self, role: SpecialistRole, prompt: str) -> SpecialistOutput:
         profile = self.ROLES[role]
+        
+        # Use multi-provider router if enabled
+        if self.use_multi_provider and self.multi_provider:
+            task_type_map = {
+                SpecialistRole.ARCHITECT: "architecture",
+                SpecialistRole.PROGRAMMER: "code",
+                SpecialistRole.REVIEWER: "review",
+                SpecialistRole.DEVOPS: "code",
+                SpecialistRole.SECURITY: "review",
+                SpecialistRole.QA: "general",
+            }
+            
+            request = GenerationRequest(
+                prompt=prompt,
+                system_prompt=profile.system_prompt,
+                temperature=profile.temperature,
+                max_tokens=profile.max_tokens,
+                budget=float(os.getenv("DEFAULT_BUDGET", "0.10")),
+                task_type=task_type_map.get(role, "general")
+            )
+            
+            response = self.multi_provider.generate(request)
+            
+            if response.success:
+                return SpecialistOutput(
+                    role, True, response.text, 
+                    f"{response.provider.value}/{response.model}",
+                    response.tokens_used
+                )
+            else:
+                return SpecialistOutput(
+                    role, False, "", "multi_provider", 0,
+                    response.error or "Multi-provider failed"
+                )
+        
+        # Fallback to original Ollama-only logic
         installed = self.available_models()
         model = profile.model
         if installed and model not in installed:
