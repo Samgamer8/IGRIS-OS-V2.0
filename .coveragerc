@@ -1,0 +1,9 @@
+# La capa de UI (PyQt6) se verifica con el smoke test del entry point
+# (tests/test_entry_point.py + check_entry_point_startup del gate), que
+# lanza el panel real en offscreen. El coverage no puede medir ese codigo
+# porque corre en subproceso, y el codigo de pintado Qt no es testeable
+# linea a linea. Se omite para que la cobertura mida la logica real
+# (kernel, memoria, IA, sandbox, retrieval, ...) en lugar del render.
+[run]
+omit =
+    src/igris_os/ui/*

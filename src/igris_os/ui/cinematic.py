@@ -1,4 +1,6 @@
+import math
 import os
+from datetime import datetime
 from pathlib import Path
 import queue
 import sys
@@ -99,10 +101,10 @@ def format_result(data):
 
 
 def run_cinematic_panel():
-    from PyQt6.QtCore import Qt, QTimer, QRectF
+    from PyQt6.QtCore import Qt, QTimer, QPointF, QRectF
     from PyQt6.QtGui import (
-        QBrush, QColor, QFont, QIcon, QLinearGradient, QPainter, QPen,
-        QPixmap, QRadialGradient,
+        QBrush, QColor, QConicalGradient, QFont, QIcon, QLinearGradient,
+        QPainter, QPen, QPixmap, QRadialGradient,
     )
     from PyQt6.QtWidgets import (
         QApplication, QFileDialog, QFrame, QLabel, QMainWindow, QMessageBox,
@@ -133,32 +135,76 @@ def run_cinematic_panel():
             del event
             p = QPainter(self)
             p.setRenderHint(QPainter.RenderHint.Antialiasing)
-            d = min(self.width() - 8, self.height() - 22)
-            x, y = (self.width() - d) / 2, 1
+            d = min(self.width() - 10, self.height() - 24)
+            x, y = (self.width() - d) / 2, 4
+            cx, cy = x + d / 2, y + d / 2
+            r, g, b = self.color.red(), self.color.green(), self.color.blue()
+
+            # Halo de acento alrededor del dial.
+            halo = QRadialGradient(cx, cy, d * 0.6)
+            halo.setColorAt(0.0, QColor(r, g, b, 110))
+            halo.setColorAt(0.6, QColor(r, g, b, 42))
+            halo.setColorAt(1.0, QColor(0, 0, 0, 0))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QBrush(halo))
+            p.drawEllipse(QRectF(cx - d * 0.6, cy - d * 0.6, d * 1.2, d * 1.2))
+
+            # Bisel exterior (metal oscuro con filo de acento).
             rim = QLinearGradient(x, y, x + d, y + d)
-            rim.setColorAt(0, self.color.lighter(180))
-            rim.setColorAt(.5, self.color)
-            rim.setColorAt(1, self.color.darker(220))
+            rim.setColorAt(0.0, QColor("#454b5b"))
+            rim.setColorAt(0.45, QColor("#181c26"))
+            rim.setColorAt(1.0, QColor("#0a0c12"))
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(QBrush(rim))
             p.drawEllipse(QRectF(x, y, d, d))
-            face = QRadialGradient(x + d / 2, y + d / 2, d / 2)
-            face.setColorAt(0, QColor("#303440"))
-            face.setColorAt(1, QColor("#050609"))
-            p.setBrush(QBrush(face))
-            p.drawEllipse(QRectF(x + 6, y + 6, d - 12, d - 12))
-            track = QRectF(x + 11, y + 11, d - 22, d - 22)
             p.setBrush(Qt.BrushStyle.NoBrush)
-            p.setPen(QPen(QColor("#1c1d24"), 8))
+            p.setPen(QPen(QColor(r, g, b, 130), 1))
+            p.drawEllipse(QRectF(x, y, d, d))
+
+            # Cara interior con profundidad.
+            face = QRadialGradient(cx, cy - d * 0.14, d * 0.6)
+            face.setColorAt(0.0, QColor("#313643"))
+            face.setColorAt(0.7, QColor("#12141c"))
+            face.setColorAt(1.0, QColor("#050609"))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QBrush(face))
+            p.drawEllipse(QRectF(x + 5, y + 5, d - 10, d - 10))
+
+            # Pista de fondo + marcas de graduación.
+            track = QRectF(x + 13, y + 13, d - 26, d - 26)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.setPen(QPen(QColor("#191c26"), 7))
             p.drawArc(track, 0, 360 * 16)
-            p.setPen(QPen(self.color, 6))
-            p.drawArc(track, 90 * 16, -int(360 * 16 * self.value / 100))
-            p.setFont(QFont("Consolas", max(9, int(d / 4.5)), QFont.Weight.Bold))
+            for k in range(40):
+                ang = math.radians(90 - k * 9.0)
+                activa = k * 2.5 <= self.value
+                r0, r1 = d / 2 - 19, d / 2 - 15
+                tick = QColor(r, g, b, 210 if activa else 60)
+                p.setPen(QPen(tick, 1.6 if activa else 1.0))
+                p.drawLine(QPointF(cx + r0 * math.cos(ang), cy - r0 * math.sin(ang)),
+                           QPointF(cx + r1 * math.cos(ang), cy - r1 * math.sin(ang)))
+
+            # Arco de progreso con barrido cónico.
+            if self.value > 0:
+                span = -int(360 * 16 * self.value / 100)
+                sweep = QConicalGradient(cx, cy, 90)
+                sweep.setColorAt(0.0, self.color.lighter(150))
+                sweep.setColorAt(0.55, self.color)
+                sweep.setColorAt(1.0, self.color.darker(150))
+                pen = QPen(QBrush(sweep), 6)
+                pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+                p.setPen(pen)
+                p.drawArc(track, 90 * 16, span)
+
+            # Valor centrado.
+            p.setFont(QFont("Consolas", max(9, int(d / 4.2)), QFont.Weight.Bold))
             p.setPen(QColor("#f7f7fa"))
-            p.drawText(QRectF(x, y, d, d), Qt.AlignmentFlag.AlignCenter,
+            p.drawText(QRectF(x, y - 2, d, d), Qt.AlignmentFlag.AlignCenter,
                        f"{self.value}{self.unit}")
+
+            # Título bajo el dial.
             p.setFont(QFont("Consolas", 8, QFont.Weight.Bold))
-            p.setPen(QColor("#c9cbd3"))
+            p.setPen(QColor("#aeb2bf"))
             p.drawText(QRectF(0, y + d, self.width(), 20),
                        Qt.AlignmentFlag.AlignCenter, self.title)
 
@@ -250,9 +296,21 @@ def run_cinematic_panel():
 
             chat_frame = QFrame(self.canvas)
             chat_frame.setStyleSheet(
-                "QFrame{background:rgba(4,5,10,232);border:1px solid "
-                "rgba(209,17,36,175);border-radius:18px;}")
+                "QFrame{background:rgba(4,5,10,242);border:1px solid "
+                "rgba(209,17,36,205);border-radius:18px;}")
             self.canvas.place(chat_frame, 1078, 48, 500, 830)
+
+            header = QLabel("COMUNICACIÓN", self.canvas)
+            header.setFont(QFont("Consolas", 10, QFont.Weight.Bold))
+            header.setStyleSheet("color:#ffd98a;background:transparent;")
+            self.canvas.place(header, 1104, 58, 220, 20)
+
+            self.clock = QLabel("", self.canvas)
+            self.clock.setFont(QFont("Consolas", 10, QFont.Weight.Bold))
+            self.clock.setStyleSheet("color:#d7dae2;background:transparent;")
+            self.clock.setAlignment(Qt.AlignmentFlag.AlignRight |
+                                    Qt.AlignmentFlag.AlignVCenter)
+            self.canvas.place(self.clock, 1330, 58, 212, 20)
 
             self.chat = QTextEdit(self.canvas)
             self.chat.setReadOnly(True)
@@ -273,15 +331,19 @@ def run_cinematic_panel():
             self.prompt.setStyleSheet(
                 "QTextEdit{background:#11131a;color:#f2f2f5;"
                 "border:2px solid #a7152d;border-radius:17px;padding:16px;}"
-                "QTextEdit:focus{border-color:#ef2444;}")
+                "QTextEdit:focus{border-color:#ff3b5c;background:#131722;}")
             self.canvas.place(self.prompt, 1100, 770, 390, 72)
 
             send = QPushButton("›", self.canvas)
             send.setFont(QFont("Consolas", 26, QFont.Weight.Bold))
+            send.setCursor(Qt.CursorShape.PointingHandCursor)
             send.clicked.connect(self.submit)
             send.setStyleSheet(
-                "QPushButton{background:#760518;color:white;border:none;"
-                "border-radius:10px;} QPushButton:hover{background:#b20d2b;}")
+                "QPushButton{background:qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+                "stop:0 #a1122b, stop:1 #57040f);color:white;"
+                "border:1px solid #ef2444;border-radius:10px;}"
+                "QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+                "stop:0 #d4203c, stop:1 #7c0a1d);border-color:#ff5b74;}")
             self.canvas.place(send, 1500, 770, 48, 72)
 
             self.status = QLabel("● Estado: Operativo", self.canvas)
@@ -308,7 +370,7 @@ def run_cinematic_panel():
             top_style = (
                 "QPushButton{background:rgba(58,15,23,220);color:#eee;"
                 "border:1px solid #651522;border-radius:8px;font-weight:bold;}"
-                "QPushButton:hover{background:#83162a;}")
+                "QPushButton:hover{background:#8a1830;border-color:#c2243d;}")
             self.voice = QPushButton("V", self.canvas)
             self.voice.setToolTip("Activar o desactivar voz local")
             self.voice.clicked.connect(self.toggle_voice)
@@ -336,8 +398,8 @@ def run_cinematic_panel():
 
             stat_frame = QFrame(self.canvas)
             stat_frame.setStyleSheet(
-                "QFrame{background:rgba(4,5,9,232);border:1px solid "
-                "rgba(255,40,60,155);border-radius:15px;}")
+                "QFrame{background:rgba(4,5,9,244);border:1px solid "
+                "rgba(255,72,92,195);border-radius:15px;}")
             self.canvas.place(stat_frame, 312, 708, 738, 145)
             labels = (
                 ("NÚCLEO", 100, "#d11124", "%"),
@@ -596,6 +658,10 @@ def run_cinematic_panel():
             self.replies.put((job.id, reply))
 
         def tick(self):
+            if getattr(self, "clock", None) is not None:
+                now = datetime.now().strftime("%H:%M:%S")
+                if self.clock.text() != now:
+                    self.clock.setText(now)
             try:
                 heard = self.voice_inputs.get_nowait()
             except queue.Empty:
