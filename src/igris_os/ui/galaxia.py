@@ -30,9 +30,9 @@ ORO = (255, 200, 80)          # trabajando
 VERDE = (120, 255, 170)       # ok
 ROJO = (255, 84, 96)          # error
 GRIS = (110, 114, 126)        # pendiente
-NARANJA = (255, 159, 0)       # ondas activas
-AMBAR = (255, 140, 40)        # rastro de impulsos
-DORADO = (255, 220, 120)      # micro-puntos
+NARANJA = (255, 132, 8)       # ondas activas
+AMBAR = (255, 108, 14)        # rastro de impulsos
+DORADO = (255, 178, 52)       # micro-puntos
 BLANCO_DORADO = (255, 242, 200)  # nucleo
 
 ESTADO_COLOR = {
@@ -532,8 +532,8 @@ class GalaxiaWidget(QWidget):
         for ring in self._rings:
             pts = self._ring_points(ring, 36)
             pr = [self._project(pt, cx, cy, f, R) for pt in pts]
-            base = int((48 + 48 * pulso_ring + 70 * act) * glitch * brillo)
-            base = max(6, min(150, base))
+            base = int((95 + 60 * pulso_ring + 90 * act) * glitch * brillo)
+            base = max(42, min(215, base))
             col = ring["color"]
             full = QPainterPath(QPointF(pr[0][0], pr[0][1]))
             for sx, sy, _d, _z in pr[1:]:
@@ -554,7 +554,7 @@ class GalaxiaWidget(QWidget):
                     front.lineTo(QPointF(b[0], b[1]))
                 else:
                     started = False
-            painter.setPen(QPen(QColor(*col, min(225, base + 90)),
+            painter.setPen(QPen(QColor(*col, min(255, base + 95)),
                                 ring["width"] + 0.6))
             painter.drawPath(front)
 
@@ -686,9 +686,9 @@ class GalaxiaWidget(QWidget):
 
         # Destello del núcleo (lens flare) y estrías.
         flare = QRadialGradient(cx, cy, R * 0.5)
-        flare.setColorAt(0.0, QColor(255, 240, 190, int(170 * brillo)))
-        flare.setColorAt(0.18, QColor(255, 205, 110, int(85 * brillo)))
-        flare.setColorAt(0.45, QColor(255, 165, 70, int(28 * brillo)))
+        flare.setColorAt(0.0, QColor(255, 250, 232, int(220 * brillo)))
+        flare.setColorAt(0.18, QColor(255, 214, 128, int(120 * brillo)))
+        flare.setColorAt(0.45, QColor(255, 152, 42, int(48 * brillo)))
         flare.setColorAt(1.0, QColor(0, 0, 0, 0))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(flare))
@@ -697,9 +697,9 @@ class GalaxiaWidget(QWidget):
             dx, dy = math.cos(ang), math.sin(ang)
             streak = QLinearGradient(cx - dx * R * 0.85, cy - dy * R * 0.85,
                                      cx + dx * R * 0.85, cy + dy * R * 0.85)
-            streak.setColorAt(0.0, QColor(255, 200, 90, 0))
-            streak.setColorAt(0.5, QColor(255, 215, 120, int(150 * brillo)))
-            streak.setColorAt(1.0, QColor(255, 200, 90, 0))
+            streak.setColorAt(0.0, QColor(255, 172, 40, 0))
+            streak.setColorAt(0.5, QColor(255, 192, 82, int(190 * brillo)))
+            streak.setColorAt(1.0, QColor(255, 172, 40, 0))
             painter.setPen(QPen(QBrush(streak), 1.6))
             painter.drawLine(QPointF(cx - dx * R * 0.85, cy - dy * R * 0.85),
                              QPointF(cx + dx * R * 0.85, cy + dy * R * 0.85))
