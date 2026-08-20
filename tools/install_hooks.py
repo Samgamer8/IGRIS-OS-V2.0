@@ -1,10 +1,10 @@
 """Instala el hook de pre-commit que ejecuta el quality gate de IGRIS.
 
 Uso:
-    py -3.12 tools/install_hooks.py
+    py -3.14 tools/install_hooks.py
 
 Escribe ``.git/hooks/pre-commit`` (no se versiona, por eso existe este
-instalador). Al commitear ejecuta ``py -3.12 tools/quality_gate.py``; si no
+instalador). Al commitear ejecuta ``py -3.14 tools/quality_gate.py``; si no
 hay launcher ``py``, usa ``python``.
 
 Atajos:
@@ -29,8 +29,8 @@ ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
 
 find_py() {
-    if command -v py >/dev/null 2>&1 && py -3.12 --version >/dev/null 2>&1; then
-        printf '%s\n' "py -3.12"
+    if command -v py >/dev/null 2>&1 && py -3.14 --version >/dev/null 2>&1; then
+        printf '%s\n' "py -3.14"
     elif command -v python >/dev/null 2>&1; then
         printf '%s\n' "python"
     else
