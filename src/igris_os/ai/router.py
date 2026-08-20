@@ -87,11 +87,14 @@ class ModelRouter:
     GENERAL_TIERS: dict[Difficulty, tuple[str, ...]] = {
         Difficulty.SIMPLE: ("llama3.1:8b", "llama3.1:latest",
                             "llama3.2:latest", "qwen2.5-coder:1.5b",
+                            "qwen2.5-coder:7b",
                             "Qwen3.6-35B-A3B-GGUF", "Qwen3.6-27B-GGUF"),
         Difficulty.NORMAL: ("llama3.1:8b", "llama3.1:latest", "llama3:latest",
+                            "qwen2.5-coder:7b",
                             "Qwen3.6-35B-A3B-GGUF", "Kimi-K3-GGUF",
                             "gpt-oss-20b"),
         Difficulty.COMPLEX: ("llama3.1:8b", "llama3.2:latest",
+                             "qwen2.5-coder:7b",
                              "Kimi-K3-GGUF", "gpt-oss-20b"),
     }
     CONTEXT_WINDOW: dict[str, int] = {
@@ -130,10 +133,12 @@ class ModelRouter:
 
     def _find_installed(self, tier_names: tuple[str, ...],
                         installed: tuple[str, ...]) -> str:
-        """Find first tier name that matches an installed model, excluding vision-only."""
+        """Find first tier name that matches an installed model, excluding vision/embedding-only."""
         for tier_name in tier_names:
             for inst_name in installed:
-                if self._name_matches(tier_name, inst_name) and not self._is_vision_only(inst_name):
+                if (self._name_matches(tier_name, inst_name)
+                        and not self._is_vision_only(inst_name)
+                        and not self._is_embedding_only(inst_name)):
                     return inst_name
         return ""
 
@@ -152,14 +157,17 @@ class ModelRouter:
         if not chosen:
             family = "qwen2.5-coder" if code else "llama"
             for name in sorted(installed):
-                if name.startswith(family) and not self._is_vision_only(name):
+                if (name.startswith(family) and not self._is_vision_only(name)
+                        and not self._is_embedding_only(name)):
                     chosen, reason = name, "nivel no disponible, familia"
                     break
         if not chosen:
-            for name in sorted(installed):
-                if not self._is_vision_only(name):
-                    chosen, reason = name, "modelo instalado"
-                    break
+            candidates = [n for n in installed
+                          if not self._is_vision_only(n)
+                          and not self._is_embedding_only(n)]
+            if candidates:
+                chosen = min(candidates, key=self._size_hint)
+                reason = "modelo instalado (mas pequeno)"
         if not chosen:
             chosen, reason = sorted(installed)[0], "solo vision disponible"
 
@@ -180,6 +188,12 @@ class ModelRouter:
         if "mmproj" in lower:
             return True
         return False
+
+    @classmethod
+    def _is_embedding_only(cls, model_name: str) -> bool:
+        """True si el modelo es solo de embeddings (no genera texto)."""
+        lower = model_name.lower()
+        return "embed" in lower or "minilm" in lower or lower.startswith("bge-")
 
     @staticmethod
     def _adjust(difficulty: Difficulty, mode: RoutingMode) -> Difficulty:
