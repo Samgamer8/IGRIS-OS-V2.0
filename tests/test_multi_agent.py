@@ -34,6 +34,7 @@ def test_workflow_stats():
     return coordinator
 
 
+@pytest.mark.skip(reason="demo multi-agente: requiere LLM en vivo")
 def test_simple_workflow(coordinator: MultiAgentCoordinator):
     """Test simple multi-agent workflow."""
     print("=== Testing Simple Multi-Agent Workflow ===\n")
@@ -64,6 +65,7 @@ def test_simple_workflow(coordinator: MultiAgentCoordinator):
     print()
 
 
+@pytest.mark.skip(reason="demo multi-agente: requiere LLM en vivo")
 def test_api_workflow(coordinator: MultiAgentCoordinator):
     """Test workflow for API design."""
     print("=== Testing API Design Workflow ===\n")
@@ -91,6 +93,7 @@ def test_api_workflow(coordinator: MultiAgentCoordinator):
     print()
 
 
+@pytest.mark.skip(reason="demo multi-agente: requiere LLM en vivo")
 def test_iteration_logic(coordinator: MultiAgentCoordinator):
     """Test iteration logic with max iterations."""
     print("=== Testing Iteration Logic ===\n")
