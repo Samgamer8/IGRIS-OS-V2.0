@@ -15,6 +15,7 @@ except ImportError:
 from igris_os.application import (
     AssistantService, MissionDirector, MissionQueue,
 )
+from igris_os.core.igrisd import IgrisDaemon
 from igris_os.bootstrap import build_igris
 from igris_os.application.director import ContractualPlan
 from igris_os.domain import Mission, MissionBranch
@@ -649,7 +650,16 @@ def run_cinematic_panel():
                     self.remember_repository_context(reply, job)
                 else:
                     context = self.memory_context() + self.semantic_context(job.objective)
-                    reply = self.assistant.respond(job.objective, context)
+                    if hasattr(self, 'igrisd') and self.igrisd is not None:
+                        result = self.igrisd.chat(job.objective, tuple(context) if context else ())
+                        from igris_os.application.assistant import AssistantReply
+                        reply = AssistantReply(
+                            ok=result.get("ok", False),
+                            text=result.get("text", ""),
+                            model=result.get("model", ""),
+                            tokens=result.get("tokens", 0))
+                    else:
+                        reply = self.assistant.respond(job.objective, context)
             except Exception as exc:
                 from igris_os.application.assistant import AssistantReply
                 reply = AssistantReply(
@@ -690,21 +700,30 @@ def run_cinematic_panel():
             self.chat.append(f"\n[IGRIS{(' · ' + model) if model else ''}] {text}")
             data = getattr(reply, "data", {})
             try:
-                if self.voice_enabled and self.voice_engine is not None:
-                    threading.Thread(
-                        target=self.voice_engine.speak, args=(text,),
-                        daemon=True).start()
-                if self.memory is not None:
+                if self.voice_enabled:
+                    def _speak():
+                        if hasattr(self, 'igrisd') and self.igrisd is not None:
+                            self.igrisd.speak(text)
+                        elif self.voice_engine is not None:
+                            self.voice_engine.speak(text)
+                    threading.Thread(target=_speak, daemon=True).start()
+                if hasattr(self, 'igrisd') and self.igrisd is not None:
+                    self.igrisd.remember(
+                        "chat", {"role": "igris", "text": text,
+                                 "ok": bool(getattr(reply, "ok", False))}, verified=True)
+                elif self.memory is not None:
                     self.memory.remember(
                         "chat", {"role": "igris", "text": text,
                                  "ok": bool(getattr(reply, "ok", False))}, verified=True)
-                if data and self.active_job is not None and self.memory is not None:
+                if data and self.active_job is not None:
                     technical = self.technical_summary(
                         self.active_job.objective, self.active_job.capability,
                         dict(data))
                     if technical:
-                        self.memory.remember(
-                            "technical", technical, verified=ok)
+                        if hasattr(self, 'igrisd') and self.igrisd is not None:
+                            self.igrisd.remember("technical", technical, verified=ok)
+                        elif self.memory is not None:
+                            self.memory.remember("technical", technical, verified=ok)
                 if data:
                     rendered = self.render_result(dict(data))
                     if rendered:
@@ -777,6 +796,7 @@ def run_cinematic_panel():
 
         def _init_services(self):
             try:
+                self.igrisd = IgrisDaemon()
                 self.assistant = AssistantService()
                 self.director = MissionDirector()
                 self.kernel = build_igris(self.runtime)
