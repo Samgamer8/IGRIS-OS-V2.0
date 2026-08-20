@@ -16,6 +16,7 @@ from igris_os.application import (
     AssistantService, MissionDirector, MissionQueue,
 )
 from igris_os.core.igrisd import IgrisDaemon
+from igris_os.ai.daemon_process import AIProcessRunner
 from igris_os.bootstrap import build_igris
 from igris_os.application.director import ContractualPlan
 from igris_os.domain import Mission, MissionBranch
@@ -796,7 +797,9 @@ def run_cinematic_panel():
 
         def _init_services(self):
             try:
-                self.igrisd = IgrisDaemon()
+                self.ai_runner = AIProcessRunner(timeout=30)
+                self.ai_runner.start()
+                self.igrisd = IgrisDaemon(ai_runner=self.ai_runner)
                 self.assistant = AssistantService()
                 self.director = MissionDirector()
                 self.kernel = build_igris(self.runtime)

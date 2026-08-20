@@ -33,8 +33,9 @@ logger = logging.getLogger(__name__)
 class IgrisDaemon:
     """Central orchestrator — the conductor of the IGRIS orchestra."""
 
-    def __init__(self) -> None:
+    def __init__(self, ai_runner: Any | None = None) -> None:
         self._ai: Any = None
+        self._ai_runner: Any = ai_runner  # optional AIProcessRunner for subprocess AI
         self._voice: Any = None
         self._memory: Any = None
         self._conversation: Any = None
@@ -245,12 +246,22 @@ class IgrisDaemon:
                 except Exception:
                     pass
                 setattr(self, name, None)
+        # Stop subprocess runner if present
+        if self._ai_runner is not None:
+            try:
+                self._ai_runner.stop()
+            except Exception:
+                pass
+            self._ai_runner = None
 
     # ------------------------------------------------------------------
     # Internal lazy instantiation
     # ------------------------------------------------------------------
 
     def _ensure_ai(self) -> Any:
+        """Return AI runner — subprocess if available, else in-process AIDaemon."""
+        if self._ai_runner is not None:
+            return self._ai_runner
         if self._ai is None:
             if self._ai_class is None:
                 raise RuntimeError("AIDaemon not importable")
