@@ -26,9 +26,9 @@ def test_provider_stats():
     print(f"Available Providers: {stats['available']}")
     print(f"Total Providers: {stats['total']}")
     print(f"Custom Priority: {stats['custom_priority']}")
-    print()
-    
-    return router
+    assert "available" in stats
+    assert "total" in stats
+    assert stats["total"] >= 1
 
 
 def test_ollama_fallback(router: MultiProviderRouter):
@@ -119,7 +119,8 @@ def test_budget_constraints(router: MultiProviderRouter):
 
 
 if __name__ == "__main__":
-    router = test_provider_stats()
+    test_provider_stats()
+    router = MultiProviderRouter()
     
     # Only run Ollama tests if it's available
     if ProviderRank.OLLAMA.value in router.get_provider_stats()["available"]:

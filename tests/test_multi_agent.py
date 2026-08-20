@@ -29,9 +29,9 @@ def test_workflow_stats():
     print(f"Total Agents: {stats['total_agents']}")
     print(f"AI Router Available: {stats['ai_router_available']}")
     print(f"Workflow Nodes: {stats['workflow_nodes']}")
-    print()
-    
-    return coordinator
+    assert stats["total_agents"] == 3
+    assert stats["ai_router_available"] is True
+    assert len(stats["workflow_nodes"]) == 4
 
 
 @pytest.mark.skip(reason="demo multi-agente: requiere LLM en vivo")
@@ -113,7 +113,9 @@ def test_iteration_logic(coordinator: MultiAgentCoordinator):
 
 
 if __name__ == "__main__":
-    coordinator = test_workflow_stats()
+    test_workflow_stats()
+    router = MultiProviderRouter()
+    coordinator = MultiAgentCoordinator(router)
     
     # Run tests
     print("Running workflow tests...\n")
