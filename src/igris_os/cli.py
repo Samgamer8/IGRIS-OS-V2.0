@@ -1,0 +1,88 @@
+import argparse
+import json
+import sys
+from pathlib import Path
+
+from igris_os.application import MissionDirector, RuntimeProbe
+from igris_os.bootstrap import build_igris
+from igris_os.domain import Mission
+from igris_os.models import default_providers
+from igris_os.storage.source_inventory import write_inventory
+
+
+def _report_progress(percent: int, message: str) -> None:
+    sys.stderr.write(f"\r[{percent:3d}%] {message}")
+    sys.stderr.flush()
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="igris", description="IGRIS OS V2.O")
+    parser.add_argument("command", choices=("health", "capabilities", "plan",
+                                            "providers", "inventory", "panel",
+                                            "probe", "ai"))
+    parser.add_argument("value", nargs="?")
+    parser.add_argument("--source", action="append", default=[])
+    parser.add_argument("--output", default="runtime/inventory/sources.json")
+    args = parser.parse_args(argv)
+    if args.command == "panel":
+        from igris_os.ui import run_panel
+        return run_panel()
+    kernel = build_igris()
+    if args.command == "probe":
+        probe = RuntimeProbe(Path.cwd())
+        statuses = probe.probe()
+        print(json.dumps({
+            name: {"state": status.state, "path": status.path}
+            for name, status in statuses.items()
+        }, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "plan":
+        if not args.value:
+            parser.error("plan necesita un objetivo")
+        plan = MissionDirector().plan(Mission(args.value))
+        print(json.dumps({"mission_id": plan.mission_id, "branch": plan.branch.value,
+                          "deliverables": plan.deliverables,
+                          "acceptance_criteria": plan.acceptance_criteria,
+                          "needs_clarification": plan.needs_clarification},
+                         ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "providers":
+        print(json.dumps([{"name": p.name, "kind": p.kind.value,
+                           "endpoint": p.endpoint}
+                          for p in default_providers().available()], indent=2))
+        return 0
+    if args.command == "inventory":
+        if not args.source:
+            parser.error("inventory necesita --source")
+        result = write_inventory([Path(item) for item in args.source],
+                                 Path(args.output),
+                                 on_progress=_report_progress)
+        sys.stderr.write("\n")
+        print(json.dumps({"sources": len(result["sources"]),
+                          "files": sum(s["file_count"] for s in result["sources"]),
+                          "output": args.output}, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "capabilities":
+        print(json.dumps([{"name": s.name, "risk": s.risk.value} for s in kernel.registry.specs()], indent=2))
+        return 0
+    if args.command == "ai":
+        from igris_os.ai.server import OllamaServer, server_status
+        action = args.value or "status"
+        if action == "status":
+            print(json.dumps(server_status(), ensure_ascii=False, indent=2))
+            return 0 if server_status()["running"] else 1
+        if action == "start":
+            ok = OllamaServer().ensure_running()
+            print(json.dumps({"running": ok, **server_status()},
+                             ensure_ascii=False, indent=2))
+            return 0 if ok else 1
+        if action == "stop":
+            server = OllamaServer()
+            server.stop()
+            print(json.dumps({"stopped": not server.is_running()},
+                             ensure_ascii=False, indent=2))
+            return 0
+        parser.error(f"ai necesita status|start|stop, got {action}")
+    result = kernel.execute(Mission("Comprobar estado local"), "system.health")
+    print(json.dumps({"ok": result.ok, "message": result.message, **result.data}, ensure_ascii=False, indent=2))
+    return 0 if result.ok else 1

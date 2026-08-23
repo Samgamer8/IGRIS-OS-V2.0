@@ -1,0 +1,49 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# --- Entornos ---
+.venv/
+venv/
+env/
+
+# --- Runtime generado (evidencia local, no fuente) ---
+runtime/logs/
+runtime/audit/
+runtime/missions/
+runtime/context/
+runtime/training/
+
+# --- Datos y secretos ---
+*.db
+*.sqlite
+*.sqlite3
+.env
+.env.*
+*.key
+*.pem
+
+# --- Build y distribucion ---
+build/
+dist/
+build_portable/
+*.spec.bak
+
+# --- Modelos y binarios pesados ---
+*.gguf
+*.bin
+*.onnx
+*.safetensors
+
+# --- Sistema operativo / editores ---
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+.idea/

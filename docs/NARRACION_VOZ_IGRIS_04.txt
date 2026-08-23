@@ -1,0 +1,98 @@
+NARRACIÓN CONTINUA — SESIÓN 04
+
+Lee con voz natural, estable y clara. Mantén el micrófono en la misma posición.
+Haz una pausa breve al final de cada párrafo.
+
+La inteligencia artificial es una herramienta que transforma información en
+decisiones, propuestas y resultados. Su calidad depende del modelo utilizado,
+pero también de los datos, las instrucciones, las herramientas disponibles y
+las pruebas aplicadas. Un sistema avanzado debe reconocer sus límites y pedir
+ayuda cuando no dispone de evidencia suficiente.
+
+Una orden puede parecer sencilla y contener varias tareas ocultas. Construir una
+aplicación implica comprender el objetivo, elegir una arquitectura, preparar la
+interfaz, organizar los datos y comprobar el comportamiento. También requiere
+documentación, control de versiones y una forma segura de corregir errores sin
+perder el trabajo anterior.
+
+IGRIS divide las misiones grandes en pasos concretos. Cada paso tiene una
+entrada, una acción y una condición de éxito. El progreso se registra para poder
+continuar después de una interrupción. Si el usuario solicita una cancelación,
+el sistema espera un punto seguro, guarda el estado y detiene la operación sin
+corromper los archivos.
+
+Los números deben pronunciarse con claridad. Uno, dos, tres, cuatro y cinco.
+Diez, veinte, treinta, cuarenta y cincuenta. Cien, quinientos y mil. El año dos
+mil veintiséis contiene doce meses, cincuenta y dos semanas y trescientos
+sesenta y cinco días. Una hora tiene sesenta minutos y cada minuto sesenta
+segundos.
+
+Las rutas y los nombres técnicos necesitan atención. Archivo punto py, proyecto
+punto json, configuración punto yaml y documento punto eme de. Una dirección
+puede comenzar con hache te te pe ese. Un programa puede usar una interfaz de
+programación, una base de datos o un servicio local protegido por contraseña.
+
+En edición de imagen se analizan dimensiones, color, contraste, enfoque y ruido.
+En edición de sonido se revisan volumen, frecuencia, silencios y distorsión. En
+vídeo se combinan fotogramas, transiciones, música, diálogos y subtítulos. Cada
+proceso debe conservar una copia original para poder comparar y retroceder.
+
+El aprendizaje automático utiliza ejemplos para encontrar patrones. Un conjunto
+de entrenamiento debe ser suficiente, equilibrado y autorizado. Si los datos
+contienen ruido o etiquetas incorrectas, el modelo aprende esos defectos. Por
+eso se revisan las muestras, se eliminan errores y se separa una parte para
+evaluar el resultado final.
+
+Esta voz se construye con grabaciones proporcionadas voluntariamente por su
+propietario. No intenta copiar la identidad de un actor ni eludir una licencia.
+El objetivo es crear una voz original para IGRIS, capaz de leer respuestas en
+español con un tono tranquilo, firme y fácil de reconocer.
+
+Una buena voz sintética debe pronunciar preguntas, advertencias y explicaciones.
+Debe manejar palabras cortas y largas, cifras, siglas y nombres poco frecuentes.
+También debe conservar el ritmo sin sonar apresurada. La naturalidad aparece
+cuando la entonación acompaña al significado de la frase.
+
+¿Quieres que continúe con la misión? ¿Debo guardar una copia adicional? ¿Qué
+archivo deseas analizar primero? Estas preguntas necesitan una entonación
+distinta de una orden. Ahora escucha una advertencia: atención, se necesita
+confirmación antes de continuar. Finalmente, una afirmación: la operación ha
+terminado correctamente.
+
+El desarrollo de videojuegos reúne muchas disciplinas. El motor representa
+escenas, personajes, luces, sonidos y reglas. La inteligencia artificial puede
+ayudar a programar comportamientos, generar pruebas y preparar recursos, pero la
+dirección creativa sigue perteneciendo al usuario. Cada prototipo es un punto de
+partida que puede crecer mediante iteraciones controladas.
+
+La comunicación entre el usuario y el sistema debe ser directa. Una respuesta
+breve es adecuada cuando el resultado es simple. Una explicación más extensa es
+útil cuando existen decisiones, riesgos o alternativas. En ambos casos, la
+información principal debe aparecer primero y las limitaciones deben expresarse
+sin ambigüedad.
+
+IGRIS no necesita prometer perfección. Necesita demostrar mejoras reales. Un
+programa sin pruebas no está terminado. Un archivo generado sin revisión puede
+contener errores. Una voz entrenada con pocos datos puede resultar inestable.
+Medir, comparar y corregir permite avanzar con confianza.
+
+La misión actual consiste en preparar una identidad vocal propia. Las muestras
+se graban, se limpian, se dividen y se transcriben de forma local. Después se
+revisará la correspondencia entre texto y sonido. Solo entonces comenzará el
+entrenamiento y se evaluará la voz con frases que nunca aparecieron en los datos.
+
+Cuando el resultado sea satisfactorio, IGRIS podrá hablar con una voz masculina
+española autorizada por el usuario. El sistema conservará una alternativa por si
+el modelo no está disponible. La voz será un módulo reemplazable, no una
+dependencia que pueda bloquear el funcionamiento del resto del proyecto.
+
+La narración se acerca a su final. Mantén el mismo volumen, respira con calma y
+pronuncia cada palabra sin correr. Todos los datos quedarán dentro del equipo.
+La seguridad, la transparencia y el control humano continuarán siendo principios
+fundamentales de IGRIS OS.
+
+Última comprobación. El micrófono permanece estable, el texto está completo y la
+sesión ha sido autorizada. IGRIS registra esta narración como material original
+para su futura voz. La grabación puede terminar ahora.
+
+FIN DE LA NARRACIÓN

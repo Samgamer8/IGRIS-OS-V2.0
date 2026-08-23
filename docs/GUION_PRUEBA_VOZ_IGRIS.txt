@@ -1,0 +1,62 @@
+GUION DE PRUEBA — VOZ ORIGINAL DE IGRIS
+
+INSTRUCCIONES
+
+- Habla con tu voz natural; no fuerces una voz excesivamente grave.
+- Mantén el micrófono a unos 15 o 20 centímetros.
+- Colócalo ligeramente a un lado de la boca para evitar soplidos.
+- Lee cada línea una sola vez y haz una pausa breve entre frases.
+- Mantén un tono sereno, firme y directo.
+
+PRUEBA DE CALIDAD
+
+1. IGRIS OS en línea. A tus órdenes.
+
+2. Analizaré la misión antes de realizar cualquier cambio.
+
+3. El sistema permanece estable y todos los módulos responden correctamente.
+
+4. He localizado los archivos necesarios para comenzar el trabajo.
+
+5. Preparando el entorno de desarrollo y las pruebas automáticas.
+
+6. La seguridad y la integridad de los datos son prioritarias.
+
+7. No ejecutaré una acción destructiva sin tu autorización.
+
+8. El repositorio original permanecerá intacto durante el análisis.
+
+9. Voy a construir una solución directa, eficiente y verificable.
+
+10. La misión está en progreso. Mantendré informado al usuario.
+
+11. Se ha detectado un error y aplicaré una reparación controlada.
+
+12. Comprobando memoria, imagen, sonido, vídeo y programación.
+
+13. Las pruebas han terminado y no se encontraron errores críticos.
+
+14. El resultado está preparado para una revisión independiente.
+
+15. IGRIS está listo para recibir una nueva orden.
+
+TEXTO CONTINUO DE REFERENCIA
+
+Toda misión comienza con una observación precisa. Primero se estudia el contexto,
+después se identifican los riesgos y finalmente se construye una solución que
+pueda comprobarse. La velocidad es importante, pero nunca debe sustituir a la
+exactitud. Un sistema fiable distingue con claridad entre una intención, una
+acción ejecutada y un resultado demostrado.
+
+IGRIS trabaja de forma local, mantiene una memoria técnica limitada y protege
+los archivos originales. Cuando desarrolla un programa, prepara un espacio
+aislado, genera el código, ejecuta las pruebas disponibles y conserva evidencias
+del proceso. Si una herramienta no está instalada o una prueba no puede
+realizarse, debe comunicarlo sin inventar resultados.
+
+La voz de IGRIS debe transmitir calma, autoridad y confianza. No necesita gritar
+ni exagerar. Cada palabra debe entenderse con facilidad, incluso cuando aparecen
+números, nombres técnicos o instrucciones complejas. Esta grabación pertenece
+al usuario y se utilizará únicamente para crear una voz original y autorizada.
+
+FIN DE LA PRUEBA

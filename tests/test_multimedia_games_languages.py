@@ -1,0 +1,65 @@
+import shutil
+import json
+
+import pytest
+
+from igris_os.games import GodotProjectFactory
+from igris_os.multimedia import MediaEngine
+from igris_os.programming.languages import Language, MultiLanguageVerifier
+
+
+def test_godot_project_requires_confirmation(tmp_path):
+    factory = GodotProjectFactory(tmp_path)
+    with pytest.raises(PermissionError):
+        factory.create("Juego")
+    project = factory.create("Juego IGRIS", confirmed=True)
+    assert factory.validate(project)
+    script = (project / "main.gd").read_text(encoding="utf-8")
+    assert "Input.get_vector" in script
+    assert (project / "VERIFICATION.json").is_file()
+
+
+@pytest.mark.parametrize("genre", ["top_down", "arcade", "platformer"])
+def test_godot_supported_genres_are_recorded(tmp_path, genre):
+    root = GodotProjectFactory(tmp_path).create(
+        "Juego " + genre, genre=genre, confirmed=True)
+    script = (root / "main.gd").read_text(encoding="utf-8")
+    report = json.loads(
+        (root / "VERIFICATION.json").read_text(encoding="utf-8"))
+    assert f'var genre := "{genre}"' in script
+    assert report["genre"] == genre
+
+
+def test_godot_rejects_unknown_genre(tmp_path):
+    with pytest.raises(ValueError):
+        GodotProjectFactory(tmp_path).create(
+            "Juego", genre="desconocido", confirmed=True)
+
+
+def test_javascript_detection(tmp_path):
+    source = tmp_path / "app.js"
+    source.write_text("const value = 2 + 2;\n", encoding="utf-8")
+    result = MultiLanguageVerifier(tmp_path).verify(source)
+    assert result.language == Language.JAVASCRIPT
+
+
+def test_typescript_detection(tmp_path):
+    source = tmp_path / "main.ts"
+    source.write_text("const value: number = 2 + 2;\nexport default value;\n",
+                      encoding="utf-8")
+    result = MultiLanguageVerifier(tmp_path).verify(source)
+    assert result.language == Language.TYPESCRIPT
+
+
+def test_unknown_language_is_controlled(tmp_path):
+    source = tmp_path / "main.xyz"
+    source.write_text("x", encoding="utf-8")
+    result = MultiLanguageVerifier(tmp_path).verify(source)
+    assert not result.ok
+
+
+def test_multimedia_confirmation_and_discovery(tmp_path):
+    engine = MediaEngine(tmp_path)
+    result = engine.transcode(tmp_path / "missing.mp4", "out.mp4")
+    assert not result.ok
+    assert engine.available == bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))

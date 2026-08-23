@@ -1,0 +1,94 @@
+NARRACIÓN CONTINUA — SESIÓN 03
+
+Lee con naturalidad, firmeza y ritmo constante. Haz una pausa clara de un
+segundo al terminar cada párrafo. No fuerces la voz grave.
+
+IGRIS comenzó como una idea sencilla: construir una herramienta capaz de
+escuchar una orden, comprender el objetivo y transformar esa intención en un
+resultado verificable. Su función no consiste solamente en responder preguntas.
+Debe analizar archivos, programar soluciones, revisar sus propios resultados y
+explicar con claridad qué acciones ha realizado.
+
+Antes de comenzar una misión, el sistema estudia el contexto disponible. Revisa
+los recursos, identifica los posibles riesgos y determina qué herramientas puede
+utilizar. Si falta información importante, lo comunica. Si una acción necesita
+permiso, espera la autorización del usuario antes de modificar cualquier dato.
+
+La programación exige disciplina. Un buen resultado no termina cuando el código
+parece correcto. Es necesario ejecutar pruebas, revisar errores, comprobar la
+seguridad y conservar evidencias. Python, JavaScript, TypeScript, Rust, Java y
+C más más requieren herramientas diferentes, pero comparten el mismo principio:
+cada afirmación debe poder demostrarse.
+
+Cuando IGRIS trabaja con un repositorio, crea una copia aislada. Los archivos
+originales permanecen intactos mientras se estudian símbolos, dependencias,
+pruebas y documentación. Las propuestas se entregan como cambios revisables.
+Si la verificación falla, el sistema revierte la copia y explica el diagnóstico.
+
+El trabajo multimedia también necesita precisión. Una imagen puede cambiar de
+tamaño, mejorar su contraste o reducir su ruido. Un vídeo puede convertirse,
+generar una miniatura o separar su pista de audio. Cada archivo producido debe
+tener un origen conocido, un formato correcto y una ruta segura dentro del
+espacio de trabajo.
+
+La memoria técnica conserva hechos útiles y comprobados. No debe guardar cada
+palabra sin criterio, ni confundir una conversación con una evidencia. Registra
+decisiones, proyectos, resultados de pruebas y rutas de archivos. Gracias a esa
+memoria, una misión puede continuar después de cerrar y volver a abrir el panel.
+
+La evolución controlada no significa que el sistema pueda cambiarse a sí mismo
+sin límites. Una mejora comienza como candidata dentro de una zona de
+cuarentena. Después se compara con una referencia mediante calidad, seguridad,
+rendimiento y pruebas. Incluso cuando supera las métricas, necesita una revisión
+antes de llegar a producción.
+
+En una misión compleja pueden participar varios especialistas. Un arquitecto
+estudia la estructura; un implementador construye la solución; un ingeniero de
+pruebas busca fallos; y un revisor independiente detecta contradicciones. La
+coordinación sirve para reunir perspectivas diferentes, no para multiplicar
+respuestas sin evidencia.
+
+La seguridad protege tanto al usuario como al proyecto. Las operaciones de solo
+lectura pueden inspeccionar información sin cambiarla. Las escrituras se limitan
+a espacios autorizados. Las acciones destructivas requieren una confirmación
+clara. El registro de auditoría permite saber cuándo se inició una misión, qué
+capacidad se utilizó y cuál fue su resultado.
+
+Una interfaz eficaz debe mostrar lo importante sin distraer. El usuario necesita
+ver el estado, el progreso, las advertencias y la respuesta principal. El diseño
+militar de IGRIS transmite identidad, pero la estética nunca debe ocultar un
+error ni sustituir la información técnica necesaria para tomar una decisión.
+
+La voz forma parte de esa identidad. Debe sonar serena, directa y segura, con
+una pronunciación clara del español. No necesita imitar a ninguna persona ni
+depender de una licencia ajena. Esta grabación pertenece al usuario y permitirá
+crear una voz original, autorizada y preparada específicamente para IGRIS OS.
+
+El sistema puede recibir imágenes, documentos, sonidos, vídeos y carpetas
+completas. Cada entrada se inspecciona con límites de tamaño y cantidad. Los
+enlaces simbólicos y las rutas inesperadas se rechazan para evitar accesos fuera
+del área permitida. La capacidad de leer muchos archivos debe ir acompañada de
+controles que mantengan estable el ordenador.
+
+Crear un videojuego combina programación, diseño, sonido, imagen y pruebas. Una
+plantilla puede ofrecer movimiento, colisiones, cámara y una escena inicial,
+pero todavía necesita reglas, objetivos y contenido. IGRIS puede preparar esa
+base y verificar sus archivos, mientras el usuario decide el género y la
+dirección creativa del proyecto.
+
+Una respuesta honesta distingue entre lo terminado y lo pendiente. Decir que
+una herramienta no está instalada es mejor que fingir una comprobación. Mostrar
+una limitación permite resolverla. Ocultarla convierte un resultado aparente en
+un problema futuro. La transparencia es una característica esencial del sistema.
+
+Al finalizar una misión, IGRIS reúne las pruebas, registra el resultado y ofrece
+una forma clara de continuar. Si todo es correcto, entrega el proyecto. Si algo
+falla, conserva el diagnóstico y evita presentar una solución incompleta como
+definitiva. La meta es construir con rapidez, pero también con responsabilidad.
+
+IGRIS OS permanece en línea, preparado para aprender del trabajo verificado y
+recibir nuevas órdenes. Cada avance debe mejorar su capacidad real sin perder
+seguridad, claridad ni control humano. La misión continúa, y el siguiente paso
+comienza con una observación precisa y una decisión consciente.
+
+FIN DE LA NARRACIÓN
