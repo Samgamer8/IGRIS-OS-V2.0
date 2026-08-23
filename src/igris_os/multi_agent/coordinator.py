@@ -6,9 +6,23 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, TypedDict, Annotated
 
-from langgraph.graph import StateGraph, END
-from langgraph.graph.message import add_messages
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+try:  # dependencia opcional: el nucleo local no debe romperse sin langgraph
+    from langgraph.graph import StateGraph, END
+    from langgraph.graph.message import add_messages
+    from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+    LANGGRAPH_AVAILABLE = True
+    LANGGRAPH_IMPORT_ERROR: str | None = None
+except ImportError as exc:  # degradacion explicita, nunca silenciosa
+    StateGraph = None  # type: ignore[assignment]
+    END = "__end__"
+    HumanMessage = AIMessage = SystemMessage = None  # type: ignore[assignment]
+
+    def add_messages(left: list, right: list) -> list:  # type: ignore[misc]
+        """Reductor minimo para que ``AgentState`` siga siendo declarable."""
+        return [*left, *right]
+
+    LANGGRAPH_AVAILABLE = False
+    LANGGRAPH_IMPORT_ERROR = str(exc)
 
 from igris_os.ai.multi_provider import MultiProviderRouter, GenerationRequest, ProviderRank
 
@@ -88,6 +102,12 @@ class MultiAgentCoordinator:
     }
     
     def __init__(self, ai_router: MultiProviderRouter | None = None) -> None:
+        if not LANGGRAPH_AVAILABLE:
+            raise RuntimeError(
+                "MultiAgentCoordinator requiere las dependencias opcionales de "
+                "multi-agente. Instala con: pip install \"igris-os[multiagent]\". "
+                f"Detalle del import: {LANGGRAPH_IMPORT_ERROR}"
+            )
         self.ai_router = ai_router or MultiProviderRouter()
         self.graph = self._build_graph()
         

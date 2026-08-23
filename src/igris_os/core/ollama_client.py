@@ -15,7 +15,7 @@ from __future__ import annotations
 import requests
 from requests.exceptions import ConnectionError, Timeout
 
-from src.igris_os.utils.logger import get_logger
+from igris_os.utils.logger import get_logger
 
 logger = get_logger("core.ollama_client")
 

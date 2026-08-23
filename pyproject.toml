@@ -8,13 +8,25 @@ version = "4.0.0"
 description = "Asistente OODA verificable de IGRIS OS v4.0 para Windows"
 requires-python = ">=3.11"
 
+# Nucleo local: lo minimo para arrancar el panel y hablar con Ollama.
+# Regla de AUTONOMY_POLICY: sin cuentas, sin cuotas, sin servicios cloud.
+dependencies = [
+    "requests>=2.31",
+    "psutil>=5.9",
+    "PyQt6>=6.4",
+]
+
 [project.scripts]
 igris = "igris_os.cli:main"
 
 [project.optional-dependencies]
-ui = ["PyQt6>=6.4"]
 dev = ["pytest>=8", "coverage>=7"]
-ai = ["requests>=2.31"]
+# Multi-agente experimental (igris_os.multi_agent)
+multiagent = ["langgraph>=0.2", "langchain-core>=0.3"]
+# Proveedores externos opcionales (Nivel 2 de AUTONOMY_POLICY)
+providers = ["litellm>=1.40", "python-dotenv>=1.0"]
+# Analisis de imagen y video
+media = ["Pillow>=10.0", "numpy>=1.26"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
