@@ -1,4 +1,9 @@
+from __future__ import annotations
+
+import multiprocessing
+
 from .cli import main
 
-raise SystemExit(main())
+multiprocessing.freeze_support()
 
+raise SystemExit(main())

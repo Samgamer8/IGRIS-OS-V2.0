@@ -33,3 +33,22 @@ def test_inventory_reports_granular_progress(tmp_path):
     assert events
     assert all(1 <= pct <= 100 for pct, _ in events)
     assert events[-1][0] >= 90
+
+
+def test_inventory_classifies_files_and_skips_symlinks(tmp_path):
+    (tmp_path / "board.png").write_bytes(b"image")
+    (tmp_path / "theme.ogg").write_bytes(b"audio")
+    (tmp_path / "legacy.exe").write_bytes(b"binary")
+    link = tmp_path / "linked.png"
+    try:
+        link.symlink_to(tmp_path / "board.png")
+    except OSError:
+        pass
+
+    result = inventory_source(tmp_path)
+
+    assert result["summary"]["categories"] == {
+        "audio": 1, "executable": 1, "image": 1}
+    assert result["summary"]["extensions"][".png"] == 1
+    assert result["summary"]["executables"] == ["legacy.exe"]
+    assert all(item["path"] != "linked.png" for item in result["files"])

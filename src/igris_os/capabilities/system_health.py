@@ -19,7 +19,7 @@ def health(_: Mapping[str, Any]) -> ExecutionResult:
     return ExecutionResult.success(
         "Nucleo operativo",
         python=sys.version.split()[0],
-        platform=platform.platform(),
+        platform="-".join((platform.system(), platform.release(), platform.machine())),
         cpu_percent=cpu_percent,
         memory_percent=memory_percent,
         available_memory=available_memory,

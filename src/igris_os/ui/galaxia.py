@@ -89,7 +89,7 @@ class GalaxiaWidget(QWidget):
         self._timer = QTimer(self)
         self._timer.setInterval(50)
         self._timer.timeout.connect(self._tick)
-        # No se inicia: la galaxia arranca congelada y solo anima al pensar.
+        self._timer.start()
 
     def _mark_dirty(self):
         self._dirty = True
@@ -182,7 +182,7 @@ class GalaxiaWidget(QWidget):
     # ------------------------------------------------------------------
     def _build_ambient(self, rnd) -> None:
         self._core = []
-        for _ in range(70):
+        for _ in range(180):
             u = rnd.uniform(-1, 1)
             ph = math.asin(u)
             th = rnd.uniform(0, 2 * math.pi)
@@ -196,7 +196,7 @@ class GalaxiaWidget(QWidget):
                        rnd.uniform(0, 6.28)),
             })
         self._data_pts = []
-        for _ in range(36):
+        for _ in range(140):
             u = rnd.uniform(-1, 1)
             ph = math.asin(u)
             th = rnd.uniform(0, 2 * math.pi)
@@ -208,26 +208,39 @@ class GalaxiaWidget(QWidget):
             })
 
     def _build_rings(self) -> None:
-        """Pistas orbitales concéntricas (esfera armilar) del núcleo."""
+        """Malla orbital densa: holograma mecánico dorado en movimiento."""
         def _norm(x, y, z):
             largo = math.sqrt(x * x + y * y + z * z) or 1.0
             return (x / largo, y / largo, z / largo)
 
         rings = []
-        # Tres círculos máximos ortogonales (armazón de la esfera).
-        for axis in ((1, 0, 0), (0, 1, 0), (0, 0, 1)):
-            rings.append({"axis": axis, "radius": 0.98, "speed": 0.10,
-                          "phase": 0.0, "color": NARANJA, "width": 2.4})
-        # Pistas concéntricas menores (plano ecuatorial).
-        for radius, speed, color in ((0.62, 0.17, AMBAR),
-                                     (0.34, 0.24, DORADO)):
-            rings.append({"axis": (0, 1, 0), "radius": radius, "speed": speed,
-                          "phase": 0.0, "color": color, "width": 1.6})
-        # Pistas inclinadas.
-        for axis, radius, speed in ((_norm(0.55, 0.80, 0.25), 0.80, 0.13),
-                                    (_norm(0.35, 0.35, 0.87), 0.52, 0.19)):
-            rings.append({"axis": axis, "radius": radius, "speed": speed,
-                          "phase": 0.0, "color": NARANJA, "width": 1.8})
+        outer = (
+            ((1, 0, 0), 1.00, 0.09), ((0, 1, 0), 1.00, -0.11),
+            ((0, 0, 1), 1.00, 0.13),
+            (_norm(.78, .52, .34), .96, .16),
+            (_norm(.61, -.74, .27), .91, -.18),
+            (_norm(.30, .62, .72), .86, .21),
+            (_norm(-.55, .30, .78), .80, -.23),
+            (_norm(.18, -.88, .44), .75, .25),
+            (_norm(.82, .13, -.55), .70, -.28),
+        )
+        for idx, (axis, radius, speed) in enumerate(outer):
+            rings.append({
+                "axis": axis, "radius": radius, "speed": speed,
+                "phase": idx * 0.37, "color": NARANJA if idx % 2 else AMBAR,
+                "width": 1.25 + (idx % 3) * .22, "dashed": idx in (3, 6, 8),
+            })
+        inner = (
+            ((0, 1, 0), .62, .31), (_norm(.70, .18, .69), .56, -.35),
+            (_norm(.24, .93, -.28), .49, .39), ((1, 0, 0), .42, -.44),
+            (_norm(.55, -.63, .55), .34, .52), ((0, 0, 1), .25, -.61),
+        )
+        for idx, (axis, radius, speed) in enumerate(inner):
+            rings.append({
+                "axis": axis, "radius": radius, "speed": speed,
+                "phase": idx * .61, "color": DORADO,
+                "width": 1.0 + idx * .08, "dashed": idx % 2 == 1,
+            })
         self._rings = rings
 
     def _ring_basis(self, ring):
@@ -390,19 +403,6 @@ class GalaxiaWidget(QWidget):
 
         self._update_sparks(dt)
 
-        # Reposo: congelar la animación cuando todo se asienta (~0 CPU).
-        asentado = (
-            not self._busy
-            and self.ia_activity < 0.06
-            and self._flash < 0.02
-            and self._activity_target < 0.08
-            and not self._sparks
-            and all(nd.get("born", 1.0) >= 1.0 for nd in self._nodes)
-            and not any(syn["pulses"] or syn["trail"] for syn in self._synapses)
-        )
-        if asentado:
-            self._timer.stop()
-
         if self._dirty:
             self._clear_dirty()
         self.update()
@@ -503,7 +503,7 @@ class GalaxiaWidget(QWidget):
         w = self.width()
         h = self.height()
         cx, cy = w / 2.0, h / 2.0
-        R = min(w, h) * 0.46
+        R = min(w, h) * 0.415
         f = 2.6
 
         act = self.ia_activity
@@ -530,15 +530,19 @@ class GalaxiaWidget(QWidget):
         # Pistas orbitales concéntricas (esfera armilar).
         pulso_ring = 0.5 + 0.5 * math.sin(self._t * 0.8)
         for ring in self._rings:
-            pts = self._ring_points(ring, 36)
+            pts = self._ring_points(ring, 52)
             pr = [self._project(pt, cx, cy, f, R) for pt in pts]
-            base = int((95 + 60 * pulso_ring + 90 * act) * glitch * brillo)
-            base = max(42, min(215, base))
+            base = int((62 + 42 * pulso_ring + 105 * act) * glitch * brillo)
+            base = max(32, min(205, base))
             col = ring["color"]
             full = QPainterPath(QPointF(pr[0][0], pr[0][1]))
-            for sx, sy, _d, _z in pr[1:]:
-                full.lineTo(QPointF(sx, sy))
-            full.closeSubpath()
+            for idx, (sx, sy, _d, _z) in enumerate(pr[1:], 1):
+                if ring.get("dashed") and idx % 7 in (0, 1):
+                    full.moveTo(QPointF(sx, sy))
+                else:
+                    full.lineTo(QPointF(sx, sy))
+            if not ring.get("dashed"):
+                full.closeSubpath()
             painter.setPen(QPen(QColor(*col, base), ring["width"]))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawPath(full)
@@ -652,10 +656,10 @@ class GalaxiaWidget(QWidget):
             sx, sy, d, _z = self._project(dp["p"], cx, cy, f, R)
             flick = 0.5 + 0.5 * (math.sin(self._t * dp["f1"] + dp["ph1"]) *
                                  math.cos(self._t * dp["f2"] + dp["ph2"]))
-            al = int(80 * d * flick * glitch * brillo)
+            al = int((55 + 95 * flick) * d * glitch * brillo)
             painter.setBrush(QBrush(QColor(*DORADO, al)))
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawEllipse(QPointF(sx, sy), 0.8, 0.8)
+            painter.drawEllipse(QPointF(sx, sy), 0.65 + flick * .55, 0.65 + flick * .55)
 
         # Nucleo denso (IGRIS).
         for c_pt in self._core:
@@ -695,14 +699,14 @@ class GalaxiaWidget(QWidget):
         painter.drawEllipse(QPointF(cx, cy), R * 0.5, R * 0.5)
         for ang in (0.0, math.pi * 0.5):
             dx, dy = math.cos(ang), math.sin(ang)
-            streak = QLinearGradient(cx - dx * R * 0.85, cy - dy * R * 0.85,
-                                     cx + dx * R * 0.85, cy + dy * R * 0.85)
+            streak = QLinearGradient(cx - dx * R * 0.58, cy - dy * R * 0.58,
+                                     cx + dx * R * 0.58, cy + dy * R * 0.58)
             streak.setColorAt(0.0, QColor(255, 172, 40, 0))
-            streak.setColorAt(0.5, QColor(255, 192, 82, int(190 * brillo)))
+            streak.setColorAt(0.5, QColor(255, 192, 82, int(105 * brillo)))
             streak.setColorAt(1.0, QColor(255, 172, 40, 0))
-            painter.setPen(QPen(QBrush(streak), 1.6))
-            painter.drawLine(QPointF(cx - dx * R * 0.85, cy - dy * R * 0.85),
-                             QPointF(cx + dx * R * 0.85, cy + dy * R * 0.85))
+            painter.setPen(QPen(QBrush(streak), 1.0))
+            painter.drawLine(QPointF(cx - dx * R * 0.58, cy - dy * R * 0.58),
+                             QPointF(cx + dx * R * 0.58, cy + dy * R * 0.58))
 
         # Etiquetas: texto legible (sin mezcla aditiva) para nodos activos,
         # con resultado o bajo el cursor.
@@ -729,7 +733,7 @@ class GalaxiaWidget(QWidget):
         w = self.width()
         h = self.height()
         cx, cy = w / 2.0, h / 2.0
-        R = min(w, h) * 0.46
+        R = min(w, h) * 0.415
         for i, nd in enumerate(self._nodes):
             sx, sy, _d, _z = self._project(nd["p"], cx, cy, 2.6, R)
             if math.hypot(sx - x, sy - y) < 22.0:

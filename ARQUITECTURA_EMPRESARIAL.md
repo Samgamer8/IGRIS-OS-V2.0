@@ -1,5 +1,4 @@
-════════════════════════════════════════════════════════════════════════════════
-          🏢 ARQUITECTURA EMPRESARIAL - IGRIS OS V 5
+          🏢 ARQUITECTURA EMPRESARIAL - IGRIS OS
          Estructura Organizacional & Capas Técnicas Integradas
 ════════════════════════════════════════════════════════════════════════════════
 

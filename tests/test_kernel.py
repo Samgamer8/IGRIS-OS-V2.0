@@ -37,6 +37,18 @@ def test_write_requires_confirmation(tmp_path):
     assert allowed.ok
 
 
+def test_write_approval_cannot_be_replayed(tmp_path):
+    kernel, registry = make_kernel(tmp_path)
+    registry.register(
+        CapabilitySpec("write", "escribe", ActionRisk.WRITE_WORKSPACE),
+        lambda _: ExecutionResult.success("ok"))
+    mission = Mission("prueba")
+    token = kernel.issue_approval(mission.objective, "write")
+    assert kernel.execute(mission, "write", approval=token).ok
+    replay = kernel.execute(mission, "write", approval=token)
+    assert replay.code == "CONFIRMATION_REQUIRED"
+
+
 def test_audit_recent_skips_corrupt_lines(tmp_path):
     audit = AuditLog(tmp_path / "audit.jsonl")
     mission = Mission("prueba")
@@ -86,3 +98,16 @@ def test_kernel_executes_without_progress_callback(tmp_path):
         CapabilitySpec("plain", "simple", ActionRisk.READ_ONLY),
         lambda request: ExecutionResult.success("ok"))
     assert kernel.execute(Mission("prueba"), "plain").ok
+
+
+def test_failure_preserves_structured_diagnostics():
+    result = ExecutionResult.failure(
+        "entrega rechazada", "DOMAIN_INVALID",
+        data={"missing": ["audit"], "forbidden": ["placeholder"]},
+    )
+
+    assert not result.ok
+    assert result.code == "DOMAIN_INVALID"
+    assert result.data == {
+        "missing": ["audit"], "forbidden": ["placeholder"]
+    }

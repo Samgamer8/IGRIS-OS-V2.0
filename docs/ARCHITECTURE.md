@@ -1,31 +1,14 @@
-# Arquitectura inicial
+# Arquitectura canónica de IGRIS OS
 
-La interfaz, CLI y futuras integraciones llaman exclusivamente a `IgrisKernel`.
-El kernel consulta el registro, aplica la politica, crea el workspace, ejecuta
-la capacidad y registra el resultado. Las capacidades no deciden sus propios
-permisos.
+Flujo obligatorio:
 
-Los datos de ejecucion viven bajo `runtime/`, fuera del paquete y del control de
-versiones. El nucleo no depende de una interfaz grafica ni de un proveedor de IA.
+`petición → contrato → plan → generación aislada → revisión → permiso humano → ejecución confinada → pruebas → evidencia → entrega`
 
-## Subsistemas
+- El kernel coordina; las capacidades no se conceden permisos a sí mismas.
+- Los tokens se ligan a ruta y capacidad, caducan y son de un uso.
+- La puerta de entrega exige estructura, ejecución, timeout, salida y hashes.
+- La generación ocurre fuera del núcleo y solo se promociona tras verificación.
 
-- application: kernel, registro y director de misiones.
-- security: riesgo, consentimiento y bloqueo destructivo.
-- programming: verificacion Python aislada.
-- files: inventario, hashes y lectura confinada.
-- memory: recuerdos SQLite que no se usan hasta ser verificados.
-- ai: Ollama local con fallo controlado.
-- tools: descubrimiento de herramientas multimedia y videojuegos.
-- evolution: candidatos medidos, nunca auto-promocion de produccion.
-- ui: panel militar; muestra planes reales, no porcentajes ficticios.
-- voice: síntesis y dictado locales; prioriza Microsoft Pablo en español.
-
-## Limites actuales
-
-La calidad depende del modelo instalado y de las herramientas externas disponibles.
-IGRIS verifica antes de entregar, pero no promete infalibilidad. Las capacidades de
-edicion multimedia y motores de juego se habilitan mediante adaptadores confinados.
-
-Los datos persistentes del panel se anclan a `runtime/` junto a la fuente canónica
-o al ejecutable portátil. Nunca dependen del directorio desde el que se invoque.
+Niveles de evidencia: contrato interno; entrega ejecutada; entrega gráfica con
+motor, arranque y captura. V5 alcanza el segundo nivel para una aplicación y un
+juego de terminal. Godot 4 no está disponible para validar el tercer nivel.

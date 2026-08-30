@@ -16,14 +16,20 @@ if (-not (Get-Command pyinstaller -ErrorAction SilentlyContinue)) {
     throw "PyInstaller no esta instalado en el entorno activo"
 }
 
-pyinstaller --noconfirm --clean --windowed --name "IGRIS OS v4.0" `
+pyinstaller --noconfirm --clean --onefile --windowed --name "IGRIS OS" `
     --icon "assets\igris_icon_v2.ico" --paths src --add-data "assets;assets" `
     --hidden-import PyQt6 main.py
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-$exe = Join-Path $root "dist\IGRIS OS v4.0\IGRIS OS v4.0.exe"
-if (-not (Test-Path -LiteralPath $exe)) { throw "No se genero el ejecutable" }
+$distDir = Join-Path $root "dist\IGRIS OS"
+$onefileExe = Join-Path $root "dist\IGRIS OS.exe"
+if (-not (Test-Path -LiteralPath $onefileExe)) { throw "No se genero el ejecutable" }
+if (-not (Test-Path -LiteralPath $distDir)) {
+    New-Item -ItemType Directory -Path $distDir | Out-Null
+}
+$exe = Join-Path $distDir "IGRIS OS.exe"
+Copy-Item -LiteralPath $onefileExe -Destination $exe -Force
 $hash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
-Set-Content -LiteralPath (Join-Path $root "dist\IGRIS OS v4.0\SHA256SUMS.txt") `
-    -Value ($hash + "  IGRIS OS v4.0.exe") -Encoding ascii
+Set-Content -LiteralPath (Join-Path $root "dist\IGRIS OS\SHA256SUMS.txt") `
+    -Value ($hash + "  IGRIS OS.exe") -Encoding ascii
 Write-Output "PORTABLE GENERADO Y VERIFICADO: $hash"

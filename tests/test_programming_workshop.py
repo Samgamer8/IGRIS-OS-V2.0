@@ -1,3 +1,6 @@
+import json
+
+from igris_os.ai import ModelReply
 from igris_os.programming import PythonWorkshop
 
 
@@ -68,3 +71,46 @@ def test_verify_blocks_undefined_name(tmp_path):
         "def f():\n    return no_existe\n", "import unittest\n")
     assert not result.ok
     assert "Lint" in result.message
+
+
+def test_repair_uses_structured_generation_when_available(tmp_path):
+    class StructuredRepairClient:
+        used_schema = None
+
+        def generate_json(self, prompt, model, schema):
+            self.used_schema = schema
+            return ModelReply(True, json.dumps({
+                "source": "def add(a, b):\n    return a + b\n",
+                "explanation": "Corrige la suma.",
+            }), model)
+
+    client = StructuredRepairClient()
+    result = PythonWorkshop(tmp_path).verify_with_repair(
+        "def add(a, b):\n    return 0\n",
+        "import unittest\nfrom solution import add\n\n"
+        "class TestAdd(unittest.TestCase):\n"
+        "    def test_add(self):\n"
+        "        self.assertEqual(add(2, 3), 5)\n",
+        client, max_attempts=2)
+
+    assert result.ok
+    assert client.used_schema is not None
+
+
+def test_repair_normalizes_literal_newline_escapes_after_ast_failure(tmp_path):
+    class EscapedRepairClient:
+        def generate_json(self, prompt, model, schema):
+            return ModelReply(True, json.dumps({
+                "source": "def add(a, b):\\n    return a + b\\n",
+                "explanation": "Corrige escapes.",
+            }), model)
+
+    result = PythonWorkshop(tmp_path).verify_with_repair(
+        "def add(a, b):\n    return 0\n",
+        "import unittest\nfrom solution import add\n\n"
+        "class TestAdd(unittest.TestCase):\n"
+        "    def test_add(self):\n"
+        "        self.assertEqual(add(2, 3), 5)\n",
+        EscapedRepairClient(), max_attempts=2)
+
+    assert result.ok

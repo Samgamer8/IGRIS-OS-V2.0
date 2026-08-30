@@ -1,4 +1,4 @@
-# Politica de autonomia de IGRIS OS v4.0
+# Politica de autonomia de IGRIS OS
 
 ## Objetivo
 
@@ -20,6 +20,13 @@ y ejecucion sandboxed sin red, cuentas ni cuotas.
 
 Las sesiones de entrenamiento deben conservar evidencia local de cada caso y
 solo promocionar estrategias que mejoren las pruebas sin introducir regresiones.
+
+`LocalTrainingRunner` aplica esta regla: registra una experiencia solo si todos
+los casos del benchmark pasan y no crea experiencia cuando la sesión falla.
+
+El progreso se contrasta tambien con `TemporalProgrammingBenchmark`, que
+compara snapshots equivalentes usando sintaxis, seguridad y tests como criterios
+observables, sin atribuir inteligencia a una cifra subjetiva.
 
 ### Nivel 1 - Software libre o local instalable
 

@@ -14,7 +14,7 @@ from igris_os.memory.compressor import ContextCompressor
 from igris_os.security.sandbox import JobObjectSandbox, SandboxRun
 
 
-SYSTEM = """Eres IGRIS OS v4.0. Eres un asistente conversacional y operador local del sistema.
+SYSTEM = """Eres IGRIS OS. Eres un sistema productivo de creación y un operador local seguro.
 
 TONO:
 - Directo, natural, sin relleno ni florituras.
@@ -60,6 +60,7 @@ class AssistantReply:
     tokens: int = 0
     backend: str = ""
     reasoning: str = ""
+    data: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -124,6 +125,8 @@ def is_conversational_input(text: str) -> bool:
         "analiza", "construye", "crea", "genera", "modifica", "corrige",
         "programa", "ejecuta", "compila", "instala", "revisa", "investiga",
         "busca", "prepara", "disena", "haz un", "haz una", "desarrolla",
+        "hacerme", "puedes hacerme", "me puedes hacer", "podrias hacer",
+        "podrías hacer",
     )
     if any(f" {word} " in f" {normalized} " for word in task_words):
         return False
@@ -143,6 +146,7 @@ class AssistantService:
                                         max_processes=4)
         self._tools: Dict[str, Callable[..., str]] = {
             "list_files": self._tool_list_files,
+            "exam_status": self._tool_exam_status,
             "git_status": self._tool_git_status,
             "git_diff": self._tool_git_diff,
             "system_info": self._tool_system_info,
@@ -200,6 +204,23 @@ class AssistantService:
         entries = sorted(target.iterdir(), key=lambda p: (p.is_file(), p.name.lower()))
         lines = [f"{'DIR ' if p.is_dir() else 'FILE'} {p.name}" for p in entries]
         return "\n".join(lines[:100])
+
+    def _tool_exam_status(self, args: str = "") -> str:
+        """Reporta solo entregas reales del examen, no prototipos internos."""
+        root = Path.cwd()
+        exam_root = root / "workspace" / "exam_deliveries"
+        expected = {
+            "chess_3d": exam_root / "chess_3d",
+            "pc_optimizer": exam_root / "pc_optimizer",
+            "control_panel": exam_root / "control_panel",
+        }
+        lines = ["EXAMEN DE PRODUCTIVIDAD REAL"]
+        for name, path in expected.items():
+            state = "ENTREGA PRESENTE" if path.is_dir() else "NO CREADA"
+            lines.append(f"{name}: {state} | {path}")
+        report = root / "runtime" / "audit" / "productivity_exam_2026-08-26.json"
+        lines.append("informe: " + (str(report) if report.is_file() else "NO EXISTE"))
+        return "\n".join(lines)
 
     def _run_sandboxed(self, command: Sequence[str], cwd: Optional[str] = None,
                        timeout_seconds: Optional[int] = None) -> SandboxRun:
@@ -275,6 +296,12 @@ class AssistantService:
         if not objective.strip():
             return AssistantReply(False, "Escribe una orden.", "", 0)
         lower = objective.strip().lower()
+        exam_terms = ("estado del examen", "trabajos del examen",
+                      "entregas del examen", "donde estan los trabajos del examen",
+                      "dónde están los trabajos del examen")
+        if any(term in lower for term in exam_terms):
+            text = self._tool_exam_status()
+            return AssistantReply(True, text, "local", 0, "filesystem")
         if self._is_conversation(lower):
             model = self._conversation_model()
             conversation_context = self._conversation_context(context)
@@ -341,6 +368,12 @@ class AssistantService:
             "Responde al ultimo mensaje con lenguaje natural, claro y conciso. "
             "No te presentes, no enumeres tus funciones y no uses frases de plantilla. "
             "No termines cada respuesta con '¿En que puedo ayudarte?' ni cambies de tema. "
+            "Tu identidad es IGRIS OS, no la del fabricante o nombre del modelo. "
+            "No digas que eres Alibaba, Qwen, una empresa ni un chatbot genérico. "
+            "No afirmes que solo puedes conversar: IGRIS puede usar herramientas locales "
+            "cuando el usuario lo solicite mediante el flujo seguro. "
+            "Nunca digas que no puedes crear archivos o proyectos en el PC: si detectas "
+            "un encargo operativo, indica brevemente que debe pasar al flujo local de misión. "
             "Si el usuario saluda, saluda y continua la charla; si pregunta por ti, responde sobre ti. "
             "Si comenta una respuesta anterior, contesta a ese comentario de forma directa. "
             "No inventes hechos: si no sabes algo, dilo; si falta contexto, pregunta una sola cosa concreta. "

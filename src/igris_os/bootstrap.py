@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from igris_os.application import CapabilityRegistry, IgrisKernel
@@ -18,9 +19,15 @@ def build_igris(runtime: Path | None = None) -> IgrisKernel:
     register_creation_capabilities(registry)
     register_git_capabilities(registry)
     register_voice_capabilities(registry)
+    approval = None
+    endpoint = os.environ.get("IGRIS_SAMADMIN_URL", "").strip()
+    if endpoint:
+        from igris_os.samadmin import SamadminApprovalAuthority, SamadminClient
+        approval = SamadminApprovalAuthority(SamadminClient(endpoint))
     return IgrisKernel(
         registry,
         PermissionPolicy(),
         AuditLog(root / "audit" / "events.jsonl"),
         MissionWorkspace(root / "missions"),
+        approval=approval,
     )

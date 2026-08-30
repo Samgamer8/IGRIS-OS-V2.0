@@ -26,6 +26,15 @@ REPAIR_SYSTEM = (
     "Sin markdown. Sin texto fuera del JSON."
 )
 
+REPAIR_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "source": {"type": "string"},
+        "explanation": {"type": "string"},
+    },
+    "required": ["source", "explanation"],
+}
+
 
 @dataclass(frozen=True, slots=True)
 class Verification:
@@ -167,7 +176,11 @@ class PythonWorkshop:
             "\nTESTS:\n" + tests +
             "\nDIAGNOSTICO DEL FALLO:\n" + diagnostics[:3000]
         )
-        reply: ModelReply = client.generate(prompt, self.repair_model)
+        generate_json = getattr(client, "generate_json", None)
+        if callable(generate_json):
+            reply: ModelReply = generate_json(prompt, self.repair_model, REPAIR_SCHEMA)
+        else:
+            reply = client.generate(prompt, self.repair_model)
         if not reply.ok:
             return RepairResult(False, "Modelo de reparacion sin respuesta: " +
                                 (reply.error or ""))
@@ -178,7 +191,14 @@ class PythonWorkshop:
             fixed = str(data.get("source", "")).strip()
             if not fixed:
                 raise ValueError("Sin source en respuesta de reparacion")
-            ast.parse(fixed)
+            try:
+                ast.parse(fixed)
+            except SyntaxError:
+                normalized = (fixed.replace("\\r\\n", "\n")
+                              .replace("\\n", "\n")
+                              .replace('\\"', '"'))
+                ast.parse(normalized)
+                fixed = normalized
             return RepairResult(True, str(data.get("explanation", "")),
                                 fixed)
         except (ValueError, TypeError, KeyError, json.JSONDecodeError,

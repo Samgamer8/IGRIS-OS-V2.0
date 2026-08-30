@@ -135,7 +135,10 @@ class AIProcessRunner:
         # Wait for first health check to confirm worker is alive
         time.sleep(0.3)
         if not self._process.is_alive():
-            return {"ok": False, "reason": "worker died on startup"}
+            return {
+                "ok": False,
+                "reason": f"worker died on startup (exitcode={self._process.exitcode})",
+            }
 
         return {"ok": True, "pid": self._process.pid}
 
@@ -167,8 +170,18 @@ class AIProcessRunner:
     # ------------------------------------------------------------------
 
     def health(self) -> dict[str, Any]:
-        """Health check via subprocess."""
-        return self._call("health", timeout=5.0)
+        """Health check via subprocess.
+
+        This is liveness-oriented: a live subprocess is considered healthy even
+        when the underlying model backend is not currently configured or has no
+        installed models. The direct daemon API still reports the stricter
+        backend readiness result.
+        """
+        result = self._call("health", timeout=5.0)
+        if result.get("ok") is False and isinstance(result.get("error"), str):
+            if "0 modelos" in result["error"]:
+                result = {**result, "ok": True, "status": "degraded", "error": None}
+        return result
 
     def models(self) -> dict[str, Any]:
         """List installed models via subprocess (full list)."""

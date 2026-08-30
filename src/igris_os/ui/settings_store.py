@@ -9,6 +9,7 @@ re-deteccion multi-backend para que el cambio surta efecto sin reiniciar.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,8 @@ SETTINGS_FILENAME = "settings.json"
 DEFAULTS: dict[str, Any] = {
     "openai_endpoint": "http://127.0.0.1:30000",
 }
+
+logger = logging.getLogger(__name__)
 
 
 def settings_path(runtime_root: Path) -> Path:
@@ -32,8 +35,8 @@ def load_settings(runtime_root: Path) -> dict[str, Any]:
         data = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(data, dict):
             settings.update({k: v for k, v in data.items() if v is not None})
-    except (OSError, ValueError):
-        pass
+    except (OSError, ValueError) as exc:
+        logger.warning("No se pudo cargar la configuracion de %s: %s", path, exc)
     return settings
 
 
@@ -45,8 +48,8 @@ def save_settings(runtime_root: Path, settings: dict[str, Any]) -> None:
         path.write_text(
             json.dumps(settings, indent=2, ensure_ascii=False),
             encoding="utf-8")
-    except OSError:
-        pass
+    except OSError as exc:
+        logger.warning("No se pudo guardar la configuracion: %s", exc)
 
 
 def apply_ai_settings(settings: dict[str, Any]) -> str:

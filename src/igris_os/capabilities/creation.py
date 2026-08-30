@@ -1,15 +1,23 @@
 import hashlib
+import json
 import mimetypes
+import shutil
 from pathlib import Path
 
 from igris_os.ai import OllamaClient
-from igris_os.application import CapabilityRegistry, SpecialistCoordinator
+from igris_os.application import (CapabilityRegistry, ProjectIntake,
+                                  ProjectOffice, SalesOffice,
+                                  SpecialistCoordinator)
+from igris_os.application.project_lead import ProjectLead
 from igris_os.delegation import (DelegatedSpecialist, DelegatedTask,
                                   OllamaSpecialist,
                                   build_resilient_specialist)
 from igris_os.domain import ActionRisk, CapabilitySpec, ExecutionResult
-from igris_os.evaluation import IndependentVerifier, run_local_benchmark
-from igris_os.games import GodotExporter, GodotProjectFactory, GameVerifier
+from igris_os.evaluation import (IndependentVerifier, approved_models, is_model_approved,
+                                 run_local_benchmark)
+from igris_os.games import (
+    GodotExporter, GodotGameDeveloper, GodotProjectFactory, GameVerifier,
+)
 from igris_os.files import RepositoryAnalyzer, RepositoryStager
 from igris_os.multimedia import (ImageEngine, MediaEngine, MediaPipeline,
                                  VisualVerifier)
@@ -48,15 +56,40 @@ def register_creation_capabilities(registry: CapabilityRegistry) -> None:
                        ActionRisk.READ_ONLY), _languages)
     registry.register(
         CapabilitySpec("programming.python.develop",
-                       "Genera, prueba y entrega un proyecto Python",
+                       "Intenta generar un proyecto Python y entrega solo si pasa pruebas",
                        ActionRisk.WRITE_WORKSPACE, True), _develop_python)
     registry.register(
+        CapabilitySpec("programming.python.multifile.develop",
+                       "Genera un proyecto Python multiarchivo y entrega solo con pruebas",
+                       ActionRisk.WRITE_WORKSPACE, True, timeout_seconds=900),
+        _develop_python_multifile)
+    registry.register(
+        CapabilitySpec("project.lead",
+                       "Recoge contrato, desarrolla y entrega con evidencia",
+                       ActionRisk.WRITE_WORKSPACE, True), _project_lead)
+    registry.register(
+        CapabilitySpec("project.stage",
+                       "Genera solo dentro de staging tras verificar el modelo",
+                       ActionRisk.WRITE_WORKSPACE, True), _project_stage)
+    registry.register(
+        CapabilitySpec("project.deliver",
+                       "Copia un staging verificado a la carpeta autorizada",
+                       ActionRisk.WRITE_WORKSPACE, True), _project_deliver)
+    registry.register(
+        CapabilitySpec("project.plan",
+                       "Planifica fases, riesgos y puertas de aceptación",
+                       ActionRisk.READ_ONLY), _project_plan)
+    registry.register(
+        CapabilitySpec("sales.plan",
+                       "Prepara un plan comercial y punto de equilibrio",
+                       ActionRisk.READ_ONLY), _sales_plan)
+    registry.register(
         CapabilitySpec("programming.autonomous.develop",
-                       "Desarrollo autonomo con arquitecto, programador y revisor",
+                       "Flujo experimental de generación con revisión y pruebas",
                        ActionRisk.WRITE_WORKSPACE, True), _develop_autonomous)
     registry.register(
         CapabilitySpec("programming.multilang.develop",
-                       "Genera y verifica un proyecto en varios lenguajes",
+                       "Flujo experimental multilenguaje; entrega solo con verificación",
                        ActionRisk.WRITE_WORKSPACE, True), _develop_multilang)
     registry.register(
         CapabilitySpec("games.godot.scaffold",
@@ -93,6 +126,10 @@ def register_creation_capabilities(registry: CapabilityRegistry) -> None:
         CapabilitySpec("repository.develop",
                        "Propone cambios verificados sobre una copia aislada",
                        ActionRisk.WRITE_WORKSPACE, True), _repository_develop)
+    registry.register(
+        CapabilitySpec("repository.repair",
+                       "Repara un staging y acepta solo tests aprobados",
+                       ActionRisk.WRITE_WORKSPACE, True), _repository_repair)
     registry.register(
         CapabilitySpec("mission.coordinate",
                        "Coordina especialistas con revision cruzada",
@@ -247,8 +284,26 @@ def _develop_python(payload):
             objective, confirmed=True,
             on_progress=payload.get("on_progress"))
     if not result.ok:
-        return ExecutionResult.failure(result.message, "DEVELOPMENT_FAILED")
-    readme = Path(result.project) / "README.md"
+        return ExecutionResult.failure(
+            result.message, "DEVELOPMENT_FAILED",
+            data={"diagnostics": list(result.diagnostics),
+                  "models_tried": list(getattr(result, 'models_tried', []))},
+        )
+    staged_project = Path(result.project)
+    delivered_project = staged_project
+    destination = str(payload.get("delivery_root", "")).strip()
+    if destination:
+        delivery_root = Path(destination).expanduser().resolve()
+        if not delivery_root.is_dir():
+            return ExecutionResult.failure(
+                "La carpeta de entrega no existe", "DELIVERY_PATH_INVALID")
+        target = delivery_root / staged_project.name
+        if target.exists():
+            return ExecutionResult.failure(
+                "Ya existe una entrega con ese nombre", "DELIVERY_PATH_EXISTS")
+        shutil.copytree(staged_project, target)
+        delivered_project = target
+    readme = delivered_project / "README.md"
     deliverable = (readme.read_text(encoding="utf-8")
                    if readme.is_file() else result.message)
     verdict = IndependentVerifier(client).verify(
@@ -258,19 +313,247 @@ def _develop_python(payload):
         generator_model=model)
     if verdict.skipped:
         return ExecutionResult.success(
-            result.message, project=result.project,
+            result.message, project=str(delivered_project),
+            staged_project=str(staged_project),
             attempts=result.attempts, independent_review="omitted")
     if not verdict.approved:
         return ExecutionResult(
             ok=False, code="INDEPENDENT_VERIFICATION_FAILED",
             message=(f"Verificador independiente rechazo la entrega "
                      f"({verdict.score:.0f}/100): {verdict.reason}"),
-            data={"project": result.project, "score": verdict.score,
+            data={"project": str(delivered_project), "score": verdict.score,
                   "verifier_model": verdict.verifier_model})
     return ExecutionResult.success(
-        result.message, project=result.project, attempts=result.attempts,
+        result.message, project=str(delivered_project),
+        staged_project=str(staged_project), attempts=result.attempts,
         independent_score=verdict.score,
         verifier_model=verdict.verifier_model)
+
+
+def _develop_python_multifile(payload):
+    from igris_os.programming import PythonMultiFileDeveloper
+
+    objective = str(payload.get("objective", "")).strip()
+    if "optimiz" in objective.casefold():
+        objective += (
+            " Usa datos reales del equipo mediante psutil si esta disponible y "
+            "fallbacks de plataforma estandar; no hardcodees metricas ni procesos. "
+            "La simulacion debe ser dry-run sin mutar archivos, la limpieza real "
+            "solo puede mover temporales propios a un backup para rollback, debe "
+            "registrar JSON y exigir confirmacion. Incluye pruebas de estas propiedades."
+        )
+    model = str(payload.get("model", "qwen2.5-coder:7b"))
+    workspace = Path(payload["workspace"])
+    domain_validator = None
+    if "optimiz" in objective.casefold():
+        def domain_validator(project: Path) -> str:
+            diagnostics = _pc_optimizer_diagnostics(project)
+            if not diagnostics["missing"] and not diagnostics["forbidden"]:
+                return ""
+            return json.dumps(diagnostics, ensure_ascii=False)
+    client = OllamaClient(timeout=float(payload.get("timeout", 300)))
+    available_models = set(client.models())
+    requested_fallbacks = payload.get("fallback_models")
+    if isinstance(requested_fallbacks, (list, tuple)):
+        candidates = tuple(str(item) for item in requested_fallbacks)
+    else:
+        candidates = (
+            "deepseek-coder-v2:16b", "devstral:24b",
+            "qwen2.5-coder:7b", "stable-code:3b-code-q4_0",
+        )
+    fallback_models = tuple(
+        candidate for candidate in candidates
+        if candidate != model and candidate in available_models
+    )
+    result = PythonMultiFileDeveloper(client, workspace, model).develop(
+        objective, confirmed=True, attempts=3, componentized=True,
+        domain_validator=domain_validator,
+        fallback_models=fallback_models,
+    )
+    if not result.ok or result.project is None:
+        return ExecutionResult.failure(
+            result.message, "DEVELOPMENT_FAILED",
+            data={"diagnostics": list(result.diagnostics),
+                  "models_tried": list(getattr(result, 'models_tried', []))},
+        )
+    destination = Path(str(payload.get("delivery_root", ""))).resolve()
+    if not destination.is_dir():
+        return ExecutionResult.failure("La carpeta de entrega no existe", "DELIVERY_PATH_INVALID")
+    target = destination / str(payload.get("delivery_name", "programa"))
+    if target.exists():
+        return ExecutionResult.failure("Ya existe una entrega con ese nombre", "DELIVERY_PATH_EXISTS")
+    shutil.copytree(result.project, target)
+    if "optimiz" in objective.casefold() and not _validate_pc_optimizer(target):
+        diagnostics = _pc_optimizer_diagnostics(target)
+        shutil.rmtree(target)
+        return ExecutionResult.failure(
+            "La entrega no demuestra diagnostico real ni acciones seguras verificables",
+            "DELIVERY_DOMAIN_VALIDATION_FAILED",
+            data=diagnostics,
+        )
+    return ExecutionResult.success(
+        "Proyecto Python multiarchivo generado y verificado",
+        project=str(target), staged_project=str(result.project),
+        generated_files=list(result.files), attempts=3,
+        models_tried=list(getattr(result, 'models_tried', [])),
+    )
+
+
+def _validate_pc_optimizer(project: Path) -> bool:
+    diagnostics = _pc_optimizer_diagnostics(project)
+    return not diagnostics["missing"] and not diagnostics["forbidden"]
+
+
+def _pc_optimizer_diagnostics(project: Path) -> dict[str, list[str]]:
+    source = "\n".join(
+        path.read_text(encoding="utf-8", errors="replace")
+        for path in project.glob("*.py")
+    ).casefold()
+    required_signals = (
+        "platform", "disk_usage", "process", "simulate", "rollback",
+        "confirm", "audit",
+    )
+    forbidden_signals = ("simulated system", "usage': 20", "process1", "todo", "placeholder")
+    return {
+        "missing": [signal for signal in required_signals if signal not in source],
+        "forbidden": [signal for signal in forbidden_signals if signal in source],
+    }
+
+
+def _project_lead(payload):
+    objective = str(payload.get("objective", "")).strip()
+    answers = payload.get("answers", {})
+    if not isinstance(answers, dict):
+        return ExecutionResult.failure("Contrato de proyecto invalido", "PROJECT_CONTRACT_INVALID")
+    workspace = Path(payload["workspace"])
+    audit_root = workspace.parent.parent / "audit"
+    model = _approved_project_model(payload, audit_root)
+    if not model:
+        return ExecutionResult(
+            ok=False, code="PROJECT_MODEL_NOT_QUALIFIED",
+            message="No hay un modelo calificado para entregar proyectos",
+            data={"requested_model": str(payload.get("model", "")),
+                  "audit_root": str(audit_root)},
+        )
+    lead = ProjectLead(
+        OllamaClient(timeout=float(payload.get("timeout", 300))),
+        workspace, model,
+    )
+    result = lead.execute(objective, answers)
+    contract = result.contract
+    if not result.ok:
+        return ExecutionResult(
+            ok=False, code="PROJECT_NOT_DELIVERED", message=result.message,
+            data={"questions": [question.prompt for question in contract.questions],
+                  "technology": contract.technology},
+        )
+    return ExecutionResult.success(
+        result.message, project=str(result.project),
+        technology=contract.technology, delivery=contract.delivery,
+        acceptance=list(contract.acceptance), verified=True)
+
+
+def _project_stage(payload):
+    objective = str(payload.get("objective", "")).strip()
+    answers = payload.get("answers", {})
+    if not isinstance(answers, dict):
+        return ExecutionResult.failure("Contrato de proyecto invalido", "PROJECT_CONTRACT_INVALID")
+    workspace = Path(payload["workspace"])
+    audit_root = workspace.parent.parent / "audit"
+    model = _approved_project_model(payload, audit_root)
+    if not model:
+        return ExecutionResult(
+            ok=False, code="PROJECT_MODEL_NOT_QUALIFIED",
+            message="No hay un modelo calificado para staging",
+            data={"requested_model": str(payload.get("model", "")),
+                  "audit_root": str(audit_root)},
+        )
+    result = ProjectLead(
+        OllamaClient(timeout=float(payload.get("timeout", 300))), workspace, model,
+    ).stage(objective, answers)
+    if not result.ok or result.staged_project is None:
+        return ExecutionResult(
+            ok=False, code="PROJECT_STAGE_FAILED", message=result.message,
+            data={"questions": [question.prompt for question in result.contract.questions]},
+        )
+    return ExecutionResult.success(
+        result.message, staged_project=str(result.staged_project),
+        model=model, technology=result.contract.technology,
+        acceptance=list(result.contract.acceptance), verified=True)
+
+
+def _approved_project_model(payload, audit_root: Path) -> str:
+    requested = str(payload.get("model", "")).strip()
+    if requested:
+        return requested if is_model_approved(audit_root, requested) else ""
+    models = approved_models(audit_root)
+    return models[0] if models else ""
+
+
+def _project_deliver(payload):
+    objective = str(payload.get("objective", "")).strip()
+    answers = payload.get("answers", {})
+    staged = payload.get("staged_project", "")
+    if not isinstance(answers, dict) or not staged:
+        return ExecutionResult.failure("Datos de entrega invalidos", "PROJECT_DELIVERY_INVALID")
+    workspace = Path(payload["workspace"])
+    result = ProjectLead(None, workspace, "").deliver(
+        objective, answers, Path(str(staged)))
+    if not result.ok or result.project is None:
+        return ExecutionResult.failure(result.message, "PROJECT_DELIVERY_FAILED")
+    return ExecutionResult.success(
+        result.message, project=str(result.project),
+        staged_project=str(result.staged_project),
+        technology=result.contract.technology,
+        acceptance=list(result.contract.acceptance), verified=True)
+
+
+def _project_plan(payload):
+    answers = payload.get("answers", {})
+    if not isinstance(answers, dict):
+        return ExecutionResult.failure("Contrato de proyecto invalido", "PROJECT_CONTRACT_INVALID")
+    try:
+        contract = ProjectIntake().build(str(payload.get("objective", "")), answers)
+    except ValueError as exc:
+        return ExecutionResult.failure(str(exc), "PROJECT_CONTRACT_INVALID")
+    if not contract.ready:
+        return ExecutionResult.success(
+            "Faltan decisiones para planificar",
+            questions=[question.prompt for question in contract.questions])
+    plan = ProjectOffice().plan(contract)
+    return ExecutionResult.success(
+        "Plan de proyecto preparado",
+        project_plan={
+            "project": plan.project_name,
+            "phases": [{"name": phase.name, "outcome": phase.outcome,
+                        "gate": phase.acceptance_gate} for phase in plan.phases],
+            "risks": list(plan.risks), "dependencies": list(plan.dependencies),
+        })
+
+
+def _sales_plan(payload):
+    answers = payload.get("answers", {})
+    if not isinstance(answers, dict):
+        return ExecutionResult.failure("Datos comerciales invalidos", "SALES_INPUT_INVALID")
+    try:
+        plan = SalesOffice().build(answers)
+    except ValueError as exc:
+        return ExecutionResult.failure(str(exc), "SALES_INPUT_INVALID")
+    if not plan.ready:
+        return ExecutionResult.success(
+            "Faltan datos comerciales",
+            questions=[question.prompt for question in plan.questions])
+    return ExecutionResult.success(
+        "Plan comercial preparado",
+        sales_plan={
+            "product": plan.product, "audience": plan.audience,
+            "channel": plan.channel, "price": plan.price,
+            "variable_cost": plan.variable_cost, "fixed_cost": plan.fixed_cost,
+            "acquisition_budget": plan.acquisition_budget,
+            "contribution_margin": plan.contribution_margin,
+            "break_even_sales": plan.break_even_sales,
+            "actions": list(plan.actions), "assumptions": list(plan.assumptions),
+        })
 
 
 def _develop_autonomous(payload):
@@ -388,15 +671,58 @@ def _develop_multilang(payload):
             objective, language=language, confirmed=True,
             on_progress=payload.get("on_progress"))
     if not result.ok:
-        return ExecutionResult.failure(result.message, "DEVELOPMENT_FAILED")
+        return ExecutionResult.failure(
+            result.message, "DEVELOPMENT_FAILED",
+            data={"diagnostics": list(result.diagnostics),
+                  "models_tried": list(getattr(result, 'models_tried', []))},
+        )
     return ExecutionResult.success(result.message, language=language)
 
 
 def _godot(payload):
     name = str(payload.get("name", "Juego IGRIS"))
-    project = GodotProjectFactory(Path(payload["workspace"])).create(
-        name, genre=str(payload.get("genre", "top_down")), confirmed=True)
-    return ExecutionResult.success("Proyecto Godot creado", project=str(project))
+    workspace = Path(payload["workspace"])
+    if payload.get("generate_full_code"):
+        result = GodotGameDeveloper(
+            OllamaClient(timeout=float(payload.get("timeout", 240))), workspace,
+            str(payload.get("model", "qwen2.5-coder:7b"))).develop(
+                str(payload.get("objective", "")), name,
+                genre=str(payload.get("genre", "top_down")), confirmed=True)
+        if not result.ok or result.project is None:
+            return ExecutionResult(
+                ok=False, code="GAME_CODE_GENERATION_FAILED",
+                message=result.message,
+                data={"diagnostics": list(result.diagnostics),
+                  "models_tried": list(getattr(result, 'models_tried', []))},
+            )
+        project = result.project
+        generated_files = result.changed_files
+    else:
+        project = GodotProjectFactory(workspace).create(
+            name, genre=str(payload.get("genre", "top_down")), confirmed=True)
+        generated_files = ()
+    brief = payload.get("brief")
+    if isinstance(brief, dict):
+        (project / "PROJECT_BRIEF.json").write_text(
+            json.dumps(brief, ensure_ascii=False, indent=2), encoding="utf-8")
+    delivered = project
+    destination = str(payload.get("delivery_root", "")).strip()
+    if destination:
+        delivery_root = Path(destination).expanduser().resolve()
+        if not delivery_root.is_dir():
+            return ExecutionResult.failure(
+                "La carpeta de entrega no existe", "DELIVERY_PATH_INVALID")
+        target = delivery_root / project.name
+        if target.exists():
+            return ExecutionResult.failure(
+                "Ya existe una entrega con ese nombre", "DELIVERY_PATH_EXISTS")
+        shutil.copytree(project, target)
+        delivered = target
+    return ExecutionResult.success(
+        "Proyecto Godot creado",
+        project=str(delivered), staged_project=str(project),
+        delivery_type=str(payload.get("delivery_type", "source")),
+        generated_files=generated_files)
 
 
 def _godot_export(payload):
@@ -544,6 +870,31 @@ def _repository_develop(payload):
             "staged_root": result.staged_root, "report": result.report,
             "changed_files": result.changed_files,
             "original_modified": False})
+
+
+def _repository_repair(payload):
+    client = OllamaClient(timeout=float(payload.get("timeout", 120)))
+    developer = RepositoryDeveloper(
+        client, Path(payload["workspace"]),
+        str(payload.get("model", "qwen2.5-coder:7b")))
+    result = developer.repair_until_verified(
+        Path(payload["staged_root"]),
+        str(payload.get("objective", "Corrige los tests")),
+        str(payload.get("diagnostics", "")),
+        max_attempts=min(3, max(1, int(payload.get("max_attempts", 3)))),
+        timeout=min(120, max(1, int(payload.get("timeout", 60)))),
+    )
+    if not result.ok:
+        return ExecutionResult.failure(result.message, "REPAIR_NOT_VERIFIED")
+    return ExecutionResult.success(
+        result.message,
+        staged_root=result.staged_root,
+        report=result.report,
+        changed_files=result.changed_files,
+        attempts=result.attempts,
+        diagnostics=result.diagnostics,
+        verified=True,
+    )
 
 
 def _coordinate(payload):

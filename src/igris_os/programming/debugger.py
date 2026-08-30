@@ -1,4 +1,4 @@
-﻿import ast
+import ast
 import json
 import re
 import textwrap
@@ -29,8 +29,8 @@ class AutoDebugger:
                 result.setdefault('explanation', '')
                 result.setdefault('confidence', 0.0)
                 return result
-            except Exception:
-                pass
+            except (json.JSONDecodeError, ValueError, KeyError):
+                logger_msg = 'Fallback a diagnóstico heurístico'
         return self._heuristic_diagnose(code, error, language)
 
     def auto_fix(self, code: str, error: str, language: str = 'python') -> str:
@@ -79,8 +79,8 @@ class AutoDebugger:
                 result.setdefault('issues', [])
                 result.setdefault('suggestions', [])
                 return result
-            except Exception:
-                pass
+            except (json.JSONDecodeError, ValueError, KeyError):
+                logger_msg = 'Fallback a perfilado heurístico'
         return self._heuristic_profile(code, language)
 
     def _extract_targets(self, code: str, language: str) -> list[str]:
@@ -223,8 +223,8 @@ class IntelligentTestGenerator:
         if reply.ok:
             try:
                 return json.loads(reply.text[:2000])
-            except Exception:
-                pass
+            except (json.JSONDecodeError, ValueError, KeyError):
+                logger_msg = 'Fallback a sugerencias heurísticas'
         return self._heuristic_suggestions(code, existing_tests)
 
     def _heuristic_spec_tests(self, spec: str, language: str) -> str:

@@ -105,7 +105,7 @@ class IgrisKernel:
         spec, handler = item
 
         # PASO 2: Evaluar policy con aprobacion verificada
-        approved = self.approval.verify(approval, mission.objective, capability)
+        approved = self.approval.consume(approval, mission.objective, capability)
         decision = self.policy.evaluate(spec, confirmed=approved)
         if not decision.allowed:
             code = "CONFIRMATION_REQUIRED" if decision.confirmation_required else "DENIED"

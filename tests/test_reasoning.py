@@ -46,6 +46,8 @@ class _OpenAIHandler(BaseHTTPRequestHandler):
 class _OllamaHandler(BaseHTTPRequestHandler):
     """Backend clasico /api/generate (sin razonamiento)."""
 
+    last_body: dict | None = None
+
     def do_POST(self):
         length = int(self.headers["Content-Length"])
         type(self).last_body = json.loads(self.rfile.read(length))

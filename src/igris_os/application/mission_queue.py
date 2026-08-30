@@ -116,6 +116,25 @@ class MissionQueue:
                 job.attempts += 1
                 self._save_atomic()
             return job
+
+    def await_supervision(self, job_id: str, request_id: str) -> None:
+        """Retiene una misión hasta que Samadmin apruebe la solicitud."""
+        with self._lock:
+            job = self._get(job_id)
+            if job.state != "pending":
+                raise ValueError("La misión no está pendiente")
+            job.state = "awaiting_supervision"
+            job.message = "Esperando Samadmin: " + request_id[:16]
+            self._save_atomic()
+
+    def release_supervision(self, job_id: str) -> None:
+        with self._lock:
+            job = self._get(job_id)
+            if job.state != "awaiting_supervision":
+                raise ValueError("La misión no espera supervisión")
+            job.state = "pending"
+            job.message = "Autorizada por Samadmin"
+            self._save_atomic()
     
     def finish(self, job_id: str, ok: bool, message: str = "") -> None:
         with self._lock:
@@ -167,7 +186,7 @@ class MissionQueue:
         count = 0
         with self._lock:
             for job in self._jobs:
-                if job.state == "pending":
+                if job.state in {"pending", "awaiting_supervision"}:
                     job.state = "cancelled"
                     job.message = "Cancelada por el usuario"
                     job.progress = 100
@@ -181,7 +200,7 @@ class MissionQueue:
     
     def summary(self) -> dict[str, int]:
         result = {state: 0 for state in (
-            "pending", "running", "completed", "failed", "cancelled")}
+            "pending", "awaiting_supervision", "running", "completed", "failed", "cancelled")}
         with self._lock:
             for job in self._jobs:
                 result[job.state] = result.get(job.state, 0) + 1

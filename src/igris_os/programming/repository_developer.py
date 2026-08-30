@@ -10,6 +10,7 @@ from igris_os.files import RepositoryAnalyzer, RepositoryStager
 from igris_os.programming.languages import Language, MultiLanguageVerifier
 from igris_os.tools import safe_output
 from igris_os.programming.preflight import ProgrammingPreflight
+from igris_os.programming.engineering_workflow import EngineeringWorkflow
 
 
 REPAIR_SYSTEM = (
@@ -181,6 +182,71 @@ class RepositoryDeveloper:
         return RepositoryDevelopmentResult(
             True, str(package.get("summary", "Cambios propuestos")),
             str(root), str(report), tuple(changed))
+
+    def verify_staged(self, staged_root: Path, *, timeout: int = 60
+                      ) -> RepositoryDevelopmentResult:
+        """Ejecuta las pruebas del staging y devuelve evidencia verificable."""
+        root = Path(staged_root).resolve()
+        if not root.is_dir():
+            return RepositoryDevelopmentResult(False, "Staging no valido")
+        test_files = list(root.rglob("test_*.py")) + list(root.rglob("*_test.py"))
+        if not test_files:
+            return RepositoryDevelopmentResult(
+                False, "No hay pruebas en el staging", str(root),
+                diagnostics=("tests_missing",))
+        result = EngineeringWorkflow().run(
+            root, ("python", "-m", "pytest", "-q"),
+            confirmed=True, timeout=timeout)
+        if result.run is None:
+            return RepositoryDevelopmentResult(
+                False, result.reason, str(root),
+                diagnostics=("tests_not_executed",))
+        report = root / "verification_report.txt"
+        report.write_text(
+            "COMMAND: python -m pytest -q\n"
+            f"RETURNCODE: {result.run.returncode}\n"
+            f"TIMED_OUT: {result.run.timed_out}\n"
+            f"SANDBOXED: {result.run.sandboxed}\n\n"
+            "STDOUT:\n" + result.run.stdout[-12000:] +
+            "\nSTDERR:\n" + result.run.stderr[-12000:],
+            encoding="utf-8")
+        ok = result.run.returncode == 0 and not result.run.timed_out
+        return RepositoryDevelopmentResult(
+            ok, "Pruebas del staging " + ("aprobadas" if ok else "fallidas"),
+            str(root), str(report), tuple(self._detect_changes(root)),
+            diagnostics=("tests_passed" if ok else "tests_failed",))
+
+    def repair_until_verified(self, staged_root: Path, objective: str,
+                              diagnostics: str, *, max_attempts: int = 3,
+                              timeout: int = 60) -> RepositoryDevelopmentResult:
+        """Repara y prueba cada intento; revierte si no obtiene evidencia."""
+        root = Path(staged_root).resolve()
+        if not root.is_dir():
+            return RepositoryDevelopmentResult(False, "Staging no valido")
+        snapshot = {
+            path.relative_to(root): path.read_bytes()
+            for path in root.rglob("*") if path.is_file()
+        }
+        last = diagnostics
+        for attempt in range(1, max(1, max_attempts) + 1):
+            repaired = self.repair(root, objective, last, max_attempts=1)
+            checked = self.verify_staged(root, timeout=timeout)
+            if checked.ok:
+                return RepositoryDevelopmentResult(
+                    True, "Reparacion verificada", str(root),
+                    checked.report, checked.changed_files, attempt,
+                    ("tests_passed",))
+            last = "; ".join(checked.diagnostics) or repaired.message
+        for path in list(root.rglob("*")):
+            if path.is_file() and path.relative_to(root) not in snapshot:
+                path.unlink()
+        for relative, content in snapshot.items():
+            target = root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content)
+        return RepositoryDevelopmentResult(
+            False, "Reparacion no verificada; staging restaurado", str(root),
+            diagnostics=("rollback", last))
 
     @staticmethod
     def _verify(path: Path) -> None:

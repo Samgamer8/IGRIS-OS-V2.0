@@ -1,0 +1,31 @@
+...........................                                              [100%]
+=========================== short test summary info ===========================
+PASSED tests/test_sequential_game_developer.py::test_piece_factory_rejects_external_assets_and_runtime_csg
+PASSED tests/test_sequential_game_developer.py::test_piece_factory_accepts_small_visual_assembly_facade
+PASSED tests/test_sequential_game_developer.py::test_piece_factory_rejects_per_piece_noise_and_static_bodies
+PASSED tests/test_sequential_game_developer.py::test_visual_component_rejects_single_primitive_placeholders
+PASSED tests/test_sequential_game_developer.py::test_visual_component_rejects_nonexistent_cylinder_radii_property
+PASSED tests/test_sequential_game_developer.py::test_resume_discards_obsolete_piece_factory_instead_of_prompt_anchoring
+PASSED tests/test_sequential_game_developer.py::test_sequential_game_developer_generates_dependency_order
+PASSED tests/test_sequential_game_developer.py::test_sequential_game_developer_repairs_reported_file
+PASSED tests/test_sequential_game_developer.py::test_sequential_game_developer_requires_confirmation
+PASSED tests/test_sequential_game_developer.py::test_mechanical_repairs_names_discarded_loop_variables
+PASSED tests/test_sequential_game_developer.py::test_mechanical_repairs_visual_mesh_api_slips
+PASSED tests/test_sequential_game_developer.py::test_visual_validator_rejects_array_mesh_and_duplicate_variables
+PASSED tests/test_sequential_game_developer.py::test_extract_raw_script_accepts_marker_protocol
+PASSED tests/test_sequential_game_developer.py::test_generation_uses_strict_channel_after_structured_failure
+PASSED tests/test_sequential_game_developer.py::test_transport_failure_escalates_without_duplicate_format_request
+PASSED tests/test_sequential_game_developer.py::test_rejected_microsector_returns_once_to_fast_queue
+PASSED tests/test_sequential_game_developer.py::test_obsolete_component_is_not_recycled_into_prompt
+PASSED tests/test_runtime_probe.py::test_probe_reports_system_tools_external
+PASSED tests/test_runtime_probe.py::test_probe_detects_bundled_tool_as_internal
+PASSED tests/test_runtime_probe.py::test_probe_missing_when_nothing_bundled
+PASSED tests/test_runtime_probe.py::test_probe_missing_list_and_summary
+PASSED tests/test_runtime_probe.py::test_catalogue_has_k3_llm_runtime
+PASSED tests/test_inventory.py::test_inventory_hashes_and_excludes_build
+PASSED tests/test_inventory.py::test_large_file_is_not_hashed
+PASSED tests/test_inventory.py::test_inventory_json
+PASSED tests/test_inventory.py::test_inventory_reports_granular_progress
+PASSED tests/test_inventory.py::test_inventory_classifies_files_and_skips_symlinks
+27 passed in 8.32s
+

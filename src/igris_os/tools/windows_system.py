@@ -50,9 +50,8 @@ class WindowsSystemAccess:
                          "version": d.get("DriverVersion", ""),
                          "manufacturer": d.get("Manufacturer", "")}
                         for d in data[:50]]
-        except Exception:
-            pass
-        return []
+        except (subprocess.SubprocessError, json.JSONDecodeError, OSError):
+            return []
 
     def list_installed_software(self) -> list[dict]:
         try:
@@ -69,9 +68,8 @@ class WindowsSystemAccess:
                          "version": d.get("DisplayVersion", ""),
                          "publisher": d.get("Publisher", "")}
                         for d in data if d.get("DisplayName")]
-        except Exception:
-            pass
-        return []
+        except (subprocess.SubprocessError, json.JSONDecodeError, OSError):
+            return []
 
     def system_info(self) -> dict:
         info = {

@@ -41,6 +41,30 @@ Objetivo: Garantizar que la IA entienda:
   - 100% testeado y verificado
   - Listo para producción inmediata
 
+📌 POLÍTICA DEFINITIVA DE CONSOLIDACIÓN (CONFIRMADA POR SAM):
+  → C:\Users\samva\OneDrive\Escritorio\IGRIS OS V 5 es la única carpeta oficial,
+    definitiva y fuente de verdad de todo el proyecto IGRIS.
+  → Toda creación o modificación nueva de IGRIS se realizará dentro de esta carpeta.
+  → El contenido relacionado con IGRIS que exista en otras carpetas no se incorporará
+    directamente: primero será inventariado, revisado, probado y corregido si procede.
+  → Antes de admitirlo se verificará su integridad, pertenencia al alcance de IGRIS,
+    compatibilidad técnica, seguridad, mantenibilidad y viabilidad.
+  → Solo se migrará aquello que supere la validación y no duplique una implementación
+    igual o mejor ya presente en V 5.
+  → Clasificación final obligatoria, sin dejar material disperso:
+    1. IGRIS OS V 5: código, datos, recursos y documentación activos del producto final.
+    2. IGRIS_Archivo: material histórico, experimental o de referencia que conserva valor,
+       pero no forma parte del producto activo ni debe cargarse durante su ejecución.
+    3. Papelera de reciclaje: material incorrecto, corrupto, redundante, inviable,
+       incompatible o sin valor técnico, histórico o probatorio.
+  → Cada traslado o descarte se realizará únicamente después de inventariar y dejar
+    constancia de la revisión y del motivo de la decisión.
+  → Queda prohibido el borrado permanente directo, salvo una orden posterior, expresa
+    y específica de Sam.
+  → Ninguna carpeta antigua se retirará hasta comprobar que su contenido válido está
+    integrado en IGRIS OS V 5 o conservado en IGRIS_Archivo, y que las pruebas y
+    verificaciones correspondientes han pasado.
+
 📊 ESTADO ACTUAL:
   Carpeta destino: C:\Users\samva\OneDrive\Escritorio\IGRIS OS V 5\
   
@@ -406,74 +430,40 @@ Para entender decisiones históricas:
 IGRIS OS está diseñado como una EMPRESA COMPLETA, con capas especializadas y roles 
 definidos, tal como se estructuraría en una corporación real (IBM, Google, etc.).
 
-📊 JERARQUÍA COMPLETA (de arriba hacia abajo):
+📊 JERARQUÍA OPERATIVA (de arriba hacia abajo):
 
-┌─────────────────────────────────────────────────────────────────┐
-│           👤 LEVEL 0: USER/ADMIN REQUEST (Sam Admin)           │
-│     Punto de entrada único - Autorización & Decisiones        │
-└─────────────────────────────────────────────────────────────────┘
-                                ▼
-┌──────────────────────────────────────────────────────────────────┐
-│   🎨 LEVEL 1: PRESENTATION & ORCHESTRATION LAYER                │
-├──────────────────┬─────────────────────────────────────────────┤
-│ Frontend:        │ Agent Orchestration:                        │
-│  • React 19+     │  • LangChain (Framework core)              │
-│  • Next.js 15+   │  • CrewAI (Multi-agent system)             │
-│  • Streamlit     │  • Mastra (Workflow engine)                │
-│  • Tailwind CSS  │  • Langsmith (Debug & monitoring)          │
-└──────────────────┴─────────────────────────────────────────────┘
-                        ▼
-    ┌───────────────┬──────────────────┬─────────────────┐
-    ▼               ▼                  ▼                 ▼
-┌──────────────┐┌──────────────┐ ┌──────────────┐ ┌──────────┐
-│ 📚 Knowledge │ │ 🧠 Models   │ │ 🔧 Tools    │ │          │
-│ Layer (RAG)  │ │ (LLMs)      │ │ (MCP)       │ │          │
-│              │ │             │ │             │ │          │
-│ • Documents  │ │ • Claude 3.7│ │ • GitHub    │ │          │
-│ • Vector DB  │ │ • GPT-5.x   │ │ • Slack     │ │          │
-│ • Memory     │ │ • Gemini    │ │ • Browser   │ │          │
-│ • Retrieval  │ │ • Llama 3.2 │ │ • APIs      │ │          │
-│ • Indexing   │ │ • Mixtral   │ │ • Database  │ │          │
-│              │ │ • Ollama    │ │ • Custom    │ │          │
-└──────────────┘└──────────────┘ └──────────────┘ │          │
-                                                   └──────────┘
-                            ▼
-            ┌────────────────────────────────────┐
-            │  💾 LEVEL 3: DATA LAYER           │
-            │  ├─ PostgreSQL 16+ (Relational)   │
-            │  ├─ Redis 7+ (Cache/Session)      │
-            │  ├─ S3/Storage (Object store)     │
-            │  ├─ Qdrant 1.7+ (Vector search)  │
-            │  └─ Elasticsearch (Full-text)     │
-            └────────────────────────────────────┘
-                            ▼
-            ┌────────────────────────────────────┐
-            │ 📊 LEVEL 4: OBSERVABILITY         │
-            │  ├─ Langfuse (Prompt mgmt)        │
-            │  ├─ Phoenix (LLM telemetry)       │
-            │  ├─ RAGAS (RAG evaluation)        │
-            │  ├─ Prometheus (Metrics)          │
-            │  └─ Grafana (Dashboards)          │
-            └────────────────────────────────────┘
-                            ▼
-            ┌────────────────────────────────────┐
-            │ 🚀 LEVEL 5: DEPLOYMENT            │
-            │  ├─ Docker 26+ (Containers)       │
-            │  ├─ Kubernetes 1.31+ (Orch.)      │
-            │  ├─ Vercel (Edge deployment)      │
-            │  ├─ Cloudflare (CDN/Workers)      │
-            │  └─ CI/CD: GitHub Actions         │
-            └────────────────────────────────────┘
+USER REQUEST
+└── SAM ADMIN — Dirección, prioridad, autorización y decisión final
+    ├── NIVEL 1A · FRONTEND / EXPERIENCIA
+    │   └── React · Next.js · Streamlit · Tailwind CSS
+    └── NIVEL 1B · AGENT ORCHESTRATION
+        └── LangGraph/LangChain · CrewAI · Mastra · workflows · guardrails
+            ├── NIVEL 2A · KNOWLEDGE (RAG)
+            │   └── documentos · indexación · memoria · retrieval · reranking
+            ├── NIVEL 2B · MODELS (LLM)
+            │   └── Claude · GPT · Gemini · Llama · Mistral · modelos locales
+            └── NIVEL 2C · TOOLS (MCP/APIs)
+                └── GitHub · Slack · browser · bases de datos · APIs · MCP propios
+                    └── NIVEL 3 · DATA LAYER
+                        └── PostgreSQL · Redis · S3/Storage · Qdrant · OpenSearch opcional
+                            └── NIVEL 4 · OBSERVABILITY & EVALS
+                                └── Langfuse · Phoenix · RAGAS · TruLens · OpenTelemetry · Prometheus/Grafana · Sentry
+                                    └── NIVEL 5 · PLATFORM & DEPLOYMENT
+                                        └── Docker · Kubernetes/Helm · Vercel · Cloudflare · GitHub Actions · Terraform/GitOps
 
+NOTA: Frontend y Orchestration son departamentos hermanos. Knowledge, Models y Tools
+trabajan en paralelo bajo Orchestration. Seguridad, privacidad, pruebas y control de
+costes son funciones transversales a todos los niveles.
 🎯 RESPONSABILIDADES POR CAPA:
 
-LEVEL 0 - User/Admin:
+NIVEL 0 - User Request / Sam Admin:
+  → Convertir cada petición en un objetivo verificable
   → Autorización de releases
   → Decisiones arquitectónicas
   → Gestión de configuración global
   → Supervisión estratégica
 
-LEVEL 1 - Frontend & Orchestration:
+NIVEL 1 - Frontend & Agent Orchestration:
   Frontend:
     → Interfaz responsive
     → Real-time updates
@@ -486,7 +476,7 @@ LEVEL 1 - Frontend & Orchestration:
     → Gestionar contexto
     → Error recovery
 
-LEVEL 2 - Knowledge, Models & Tools:
+NIVEL 2 - Knowledge, Models & Tools (equipos paralelos):
   Knowledge:
     → Ingestión de documentos
     → Indexación en vector DB
@@ -505,24 +495,42 @@ LEVEL 2 - Knowledge, Models & Tools:
     → Manejo de errores
     → Rate limiting
 
-LEVEL 3 - Data:
+NIVEL 3 - Data:
   → Persistencia ACID
   → Escalabilidad horizontal
   → Backup & recovery
   → Encryption
   → Data governance
 
-LEVEL 4 - Observability:
+NIVEL 4 - Observability & Evals:
   → Monitorear latencias
   → Evaluar calidad
   → Detectar anomalías
   → SLA compliance
 
-LEVEL 5 - Deployment:
+NIVEL 5 - Platform & Deployment:
   → Deployments sin downtime
   → Auto-scaling
   → Disaster recovery
   → Security hardening
+
+🔁 PROTOCOLO DE ACTUACIÓN EMPRESARIAL (OBLIGATORIO):
+
+  1. User Request entrega la necesidad a Sam Admin.
+  2. Sam Admin define objetivo, prioridad, alcance, riesgo y criterio de aceptación.
+  3. Orchestration descompone el trabajo, asigna responsables y controla dependencias.
+  4. Frontend, Knowledge, Models y Tools ejecutan en paralelo cuando sea seguro.
+  5. Data valida contratos, persistencia, migraciones, privacidad y recuperación.
+  6. Observability & Evals verifica trazas, calidad, coste, latencia y regresiones.
+  7. Platform & Deployment promociona el artefacto por entornos con rollback.
+  8. Sam Admin recibe evidencias, acepta o rechaza; Frontend comunica el resultado.
+
+REGLAS DE GOBIERNO:
+  → Ninguna capa se elige por moda: se usa solo si aporta valor al caso real.
+  → Los nombres anteriores son opciones tecnológicas, no dependencias obligatorias.
+  → Seguridad, privacidad, control de costes y pruebas atraviesan todas las capas.
+  → Toda entrega debe tener responsable, criterio de aceptación, evidencia y rollback.
+  → Los cambios críticos, destructivos o de producción requieren autorización de Sam.
 
 📁 VER ARCHIVO COMPLETO: ARQUITECTURA_EMPRESARIAL.md
    (Documentación detallada por capas, tecnologías, y flujos)

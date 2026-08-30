@@ -44,6 +44,11 @@ def test_panel_flow_issues_approval_token_and_executes(tmp_path):
     assert reply.ok
     assert queue.summary()["completed"] == 1
 
+    replay = kernel.execute(
+        Mission(job.objective), job.capability, job.payload,
+        approval=job.payload.get("__approval"))
+    assert replay.code == "CONFIRMATION_REQUIRED"
+
 
 def test_panel_job_without_token_is_denied(tmp_path):
     """Si el payload no lleva __approval, la capacidad con confirmacion se niega."""

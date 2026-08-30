@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""IGRIS OS V4.0 — punto de entrada unificado.
+"""IGRIS OS — punto de entrada unificado.
 
 Sin argumentos lanza el panel grafico; con argumentos delega en la CLI
 (p. ej. ``python main.py health``, ``python main.py plan "..."``).
@@ -12,6 +12,7 @@ de terminar con un traceback crudo (degradacion controlada).
 from __future__ import annotations
 
 import logging
+import multiprocessing
 import sys
 import traceback
 from pathlib import Path
@@ -66,4 +67,5 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     raise SystemExit(main())

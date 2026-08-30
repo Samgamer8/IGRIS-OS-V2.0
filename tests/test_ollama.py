@@ -16,6 +16,16 @@ def test_unavailable_ollama_is_controlled():
     assert OllamaClient("http://127.0.0.1:1").models() == ()
 
 
+def test_unavailable_structured_generation_is_not_disguised_as_success():
+    reply = OllamaClient(
+        "http://127.0.0.1:1", timeout=0.1).generate_json(
+            "write code", "missing-model",
+            {"type": "object", "properties": {"content": {"type": "string"}}})
+    assert not reply.ok
+    assert reply.text == ""
+    assert reply.error
+
+
 class _EmbedHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers["Content-Length"])

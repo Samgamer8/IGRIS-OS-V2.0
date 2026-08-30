@@ -1,5 +1,6 @@
 from igris_os.bootstrap import build_igris
 from igris_os.domain import Mission
+from igris_os.capabilities.creation import _validate_pc_optimizer
 
 
 def test_godot_capability_requires_kernel_confirmation(tmp_path):
@@ -14,13 +15,21 @@ def test_godot_capability_requires_kernel_confirmation(tmp_path):
 
 
 def test_creation_catalog_is_visible(tmp_path):
-    names = {spec.name for spec in build_igris(tmp_path).registry.specs()}
+    specs = {spec.name: spec for spec in build_igris(tmp_path).registry.specs()}
+    names = set(specs)
     assert "programming.python.develop" in names
+    assert "programming.python.multifile.develop" in names
+    assert specs["programming.python.multifile.develop"].timeout_seconds == 900
+    assert "solo si pasa pruebas" in specs[
+        "programming.python.develop"].description
+    assert "project.stage" in names
+    assert "project.deliver" in names
     assert "programming.preflight" in names
     assert "programming.assess" in names
     assert "programming.propose" in names
     assert "programming.benchmark" in names
     assert "programming.execute_verified" in names
+    assert "repository.repair" in names
     assert "multimedia.status" in names
     assert "multimedia.verify" in names
     assert "image.resize" in names
@@ -28,6 +37,22 @@ def test_creation_catalog_is_visible(tmp_path):
     assert "multimedia.thumbnail" in names
     assert "multimedia.transcode" in names
     assert "files.inspect" in names
+
+
+def test_pc_optimizer_validator_rejects_simulated_delivery(tmp_path):
+    project = tmp_path / "programa"
+    project.mkdir()
+    (project / "service.py").write_text(
+        "# Simulated system information\n"
+        "def simulate_cleanup(): pass\n"
+        "def rollback_cleanup(): pass\n"
+        "def confirm(): pass\n"
+        "def audit(): pass\n"
+        "def process(): pass\n"
+        "def platform(): pass\n"
+        "def disk_usage(): pass\n", encoding="utf-8")
+
+    assert not _validate_pc_optimizer(project)
 
 
 def test_execute_verified_uses_allowlist_and_sandbox(tmp_path):
@@ -39,9 +64,11 @@ def test_execute_verified_uses_allowlist_and_sandbox(tmp_path):
     denied_command = kernel.execute(mission, "programming.execute_verified", {
         "workspace": str(tmp_path), "command": ["cmd.exe", "/c", "echo", "no"]},
         approval=token)
+    allowed_token = kernel.issue_approval(
+        mission.objective, "programming.execute_verified")
     allowed = kernel.execute(mission, "programming.execute_verified", {
         "workspace": str(tmp_path), "command": ["python", "-c", "print('ok')"]},
-        approval=token)
+        approval=allowed_token)
     assert denied.code == "CONFIRMATION_REQUIRED"
     assert denied_command.code == "COMMAND_NOT_ALLOWED"
     assert allowed.ok

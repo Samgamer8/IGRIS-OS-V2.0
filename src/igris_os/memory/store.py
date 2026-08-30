@@ -34,9 +34,15 @@ class MemoryStore:
     
     def __init__(self, path: Path) -> None:
         env_override = os.environ.get("IGRIS_MEMORY_PATH")
-        if env_override:
+        temporary_root = Path(tempfile.gettempdir()).resolve()
+        resolved_path = Path(path).resolve()
+        explicit_temporary_path = (
+            resolved_path.is_relative_to(temporary_root)
+            or ".pytest_tmp" in resolved_path.parts
+        )
+        if env_override and not explicit_temporary_path:
             path = Path(env_override) / "memories.db"
-        elif _is_onedrive_path(path):
+        elif _is_onedrive_path(path) and not explicit_temporary_path:
             path = Path(tempfile.gettempdir()) / "igris_memory" / "memories.db"
         self.path = path
         self._write_lock = threading.Lock()

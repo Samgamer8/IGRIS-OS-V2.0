@@ -38,6 +38,8 @@ def test_natural_greetings_use_dynamic_model_response():
     assert is_conversational_input("La información precisa es importante.")
     assert is_conversational_input("explica la historia")
     assert not is_conversational_input("construye un juego")
+    assert not is_conversational_input(
+        "podrias hacerme un juego de ajedrez con reglas y piezas medievales")
 
 
 def test_short_conversation_skips_mission_planning():
@@ -83,6 +85,9 @@ def test_conversation_prompt_discourages_support_template():
         "que tal te encuentras?", ("user: hola", "assistant: Hola",))
     assert "No termines cada respuesta" in prompt
     assert "¿En que puedo ayudarte?" in prompt
+    assert "Tu identidad es IGRIS OS" in prompt
+    assert "No digas que eres Alibaba" in prompt
+    assert "no puedes crear archivos" in prompt
 
 
 def test_engineering_contract_requires_evidence_and_critique():
@@ -130,6 +135,27 @@ def test_assistant_includes_verified_context():
         "continua", ("user: crea una calculadora", "igris: proyecto listo"))
     assert "HISTORIAL RECIENTE" in client.prompt
     assert "proyecto listo" in client.prompt
+
+
+def test_exam_status_reports_real_deliveries_without_using_llm(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    client = FakeClient()
+
+    result = AssistantService(client).respond("donde estan los trabajos del examen")
+
+    assert result.ok
+    assert result.model == "local"
+    assert "chess_3d: NO CREADA" in result.text
+    assert "pc_optimizer: NO CREADA" in result.text
+    assert "control_panel: NO CREADA" in result.text
+
+
+def test_chess_creation_is_not_mistaken_for_exam_status():
+    result = AssistantService(FakeClient()).respond(
+        "construye un juego de ajedrez medieval")
+
+    assert "EXAMEN DE PRODUCTIVIDAD" not in result.text
+    assert result.model == "qwen2.5-coder:7b"
 
 
 def test_run_command_rejects_unlisted_tool():

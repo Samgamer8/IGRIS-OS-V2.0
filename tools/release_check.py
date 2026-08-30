@@ -1,4 +1,5 @@
 import json
+import tomllib
 from pathlib import Path
 
 
@@ -9,7 +10,8 @@ REQUIRED = (
     "src/igris_os/ui/cinematic.py",
     "src/igris_os/application/kernel.py",
     "src/igris_os/security/policy.py",
-    "docs/SESSION_CONTINUITY.md",
+    "README.md",
+    "VERSION",
 )
 
 
@@ -20,14 +22,16 @@ def main() -> int:
         text = path.read_text(encoding="utf-8")
         if any(marker in text for marker in ("Ã", "Â", "â€¢", "â€”")):
             damaged.append(str(path.relative_to(ROOT)))
-    state = json.loads((ROOT / "PROJECT_STATE.json").read_text(encoding="utf-8"))
-    expected_folder = state.get("canonical_folder")
-    misplaced = bool(expected_folder) and ROOT.name != expected_folder
-    if missing or damaged or misplaced:
+    version = (ROOT / "VERSION").read_text(encoding="ascii").strip()
+    metadata = tomllib.loads(
+        (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    declared = metadata["project"]["version"]
+    inconsistent = version != declared
+    if missing or damaged or inconsistent:
         print(json.dumps(
             {"missing": missing, "encoding": damaged,
-             "misplaced": misplaced, "expected_folder": expected_folder,
-             "actual_folder": ROOT.name},
+             "version": version, "declared_version": declared,
+             "version_inconsistent": inconsistent},
             indent=2))
         return 1
     print("RELEASE CHECK: APROBADO")

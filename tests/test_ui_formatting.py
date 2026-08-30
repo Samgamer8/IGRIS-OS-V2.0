@@ -90,3 +90,37 @@ def test_change_proposal_is_human_readable():
     assert "PROPUESTA DE CAMBIOS" in rendered
     assert "app.py" in rendered
     assert "CONFIRMACION REQUERIDA" in rendered
+
+
+def test_project_delivery_lists_files_and_verification(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "main.py").write_text("print('ok')", encoding="utf-8")
+    (project / "test_main.py").write_text("def test_ok(): pass", encoding="utf-8")
+    (project / "VERIFICATION.json").write_text("{}", encoding="utf-8")
+
+    rendered = format_result({"project": str(project)})
+
+    assert "PROYECTO ENTREGADO" in rendered
+    assert "main.py" in rendered
+    assert "test_main.py" in rendered
+    assert "VERIFICATION.json presente" in rendered
+    assert "Sin modificar" in rendered
+
+
+def test_sales_plan_format_shows_calculated_break_even():
+    rendered = format_result({"sales_plan": {
+        "product": "IGRIS", "audience": "equipos pequeños",
+        "channel": "demostraciones", "contribution_margin": 40,
+        "break_even_sales": 12,
+        "actions": ["Lanzar experimento"],
+        "assumptions": ["No es una previsión"],
+    }})
+    assert "PLAN COMERCIAL" in rendered
+    assert "Punto de equilibrio: 12" in rendered
+
+
+def test_staging_format_requires_separate_delivery_authorization():
+    rendered = format_result({"staged_project": "runtime/missions/abc/projects/demo"})
+    assert "STAGING VERIFICADO" in rendered
+    assert "autorización de entrega" in rendered

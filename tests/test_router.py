@@ -1,4 +1,5 @@
 from igris_os.ai import Budget, Difficulty, ModelRouter, RoutingMode
+from igris_os.application.mission_router import MissionRouter
 
 
 class FakeClient:
@@ -124,3 +125,20 @@ def test_general_never_picks_larger_than_smallest_available():
         usable = [m for m in models if "embed" not in m]
         smallest = min(usable, key=ModelRouter._size_hint)
         assert chosen == smallest, f"{models}: eligio {chosen!r}, esperaba {smallest!r}"
+
+
+def test_natural_language_game_request_routes_to_scaffold_without_llm():
+    router = MissionRouter(use_llm_director=False)
+    action = router.route(
+        "podrias hacerme un juego de ajedrez con reglas y piezas medievales")
+    assert action.kind == "capability"
+    assert action.capability == "games.godot.scaffold"
+    assert action.requires_confirmation
+
+
+def test_natural_language_software_request_routes_to_verified_developer():
+    router = MissionRouter(use_llm_director=False)
+    action = router.route("podrias hacerme una aplicacion para gestionar tareas")
+    assert action.kind == "capability"
+    assert action.capability == "project.stage"
+    assert action.requires_confirmation

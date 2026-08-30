@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, TypedDict, Annotated
@@ -262,10 +263,7 @@ class MultiAgentCoordinator:
     
     def _should_continue(self, state: AgentState) -> str:
         """Decide whether to continue iteration or end."""
-        # Check if review indicates approval
-        review_text = state.get("review_result", "").lower()
-        
-        if "approved" in review_text or "no issues" in review_text:
+        if self._review_approved(state.get("review_result", "")):
             logger.info("Implementation approved - ending workflow")
             return "end"
         
@@ -277,6 +275,12 @@ class MultiAgentCoordinator:
         # Continue for another iteration
         logger.info(f"Continuing iteration {state.get('iteration', 0) + 1}")
         return "continue"
+
+    @staticmethod
+    def _review_approved(review_text: str) -> bool:
+        """Fail closed: only an explicit standalone verdict is approval."""
+        return bool(re.search(
+            r"(?im)^\s*APPROVED\s*[.!]?\s*$", review_text or ""))
     
     def execute(self, objective: str, max_iterations: int = 3) -> Dict[str, Any]:
         """Execute the multi-agent workflow."""
@@ -297,15 +301,16 @@ class MultiAgentCoordinator:
         try:
             final_state = self.graph.invoke(initial_state)
             
+            approved = self._review_approved(final_state["review_result"])
             return {
-                "success": True,
+                "success": approved,
                 "objective": objective,
                 "architecture_plan": final_state["architecture_plan"],
                 "code_implementation": final_state["code_implementation"],
                 "review_result": final_state["review_result"],
                 "iterations": final_state["iteration"],
                 "messages": final_state["messages"],
-                "approved": "approved" in final_state["review_result"].lower()
+                "approved": approved
             }
         except Exception as e:
             logger.error(f"Multi-agent workflow failed: {str(e)}")

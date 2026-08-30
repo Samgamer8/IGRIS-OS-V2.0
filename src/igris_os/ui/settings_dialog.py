@@ -6,6 +6,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from igris_os.voice.windows import _powershell_kwargs
+
 from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtGui import QColor, QIcon, QPalette
 from PyQt6.QtWidgets import (
@@ -193,8 +195,9 @@ class SettingsDialog(QDialog):
                 "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer;"
                 "$s.GetInstalledVoices()|%{$_.VoiceInfo.Name}")
             result = subprocess.run(
-                ["powershell.exe", "-NoProfile", "-Command", script],
+                ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
                 capture_output=True, text=True, timeout=10, check=False,
+                **_powershell_kwargs(),
             )
             if result.returncode == 0:
                 names = [line.strip() for line in result.stdout.splitlines() if line.strip()]
@@ -222,9 +225,10 @@ class SettingsDialog(QDialog):
             "$s.Speak([Console]::In.ReadToEnd())")
         try:
             subprocess.Popen(
-                ["powershell.exe", "-NoProfile", "-Command", script],
+                ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
                 stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL, text=True).communicate(text)
+                stderr=subprocess.DEVNULL, text=True,
+                **_powershell_kwargs()).communicate(text)
         except OSError:
             pass
 

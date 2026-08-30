@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import shutil
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -37,6 +38,15 @@ class VerificationResult:
     exit_code: int | None = None
     stdout: str = ""
     stderr: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ToolchainDetection:
+    language: Language
+    markers: tuple[str, ...]
+    executable: str | None
+    available: bool
+    requires_network: bool
 
 
 class MultiLanguageVerifier:
@@ -95,6 +105,36 @@ class MultiLanguageVerifier:
             if suffix in profile.extensions:
                 return language
         return None
+
+    def detect_project(self, root: Path | None = None) -> tuple[ToolchainDetection, ...]:
+        """Detecta toolchains por estructura, sin instalar ni descargar nada."""
+        project_root = (root or self.root).resolve()
+        if not project_root.is_dir():
+            return ()
+        files = {path.name.casefold() for path in project_root.iterdir() if path.is_file()}
+        suffixes = {path.suffix.casefold() for path in project_root.rglob("*")
+                    if path.is_file() and not any(part in {".git", "node_modules", "dist", "build"}
+                                                  for part in path.parts)}
+        candidates: list[tuple[Language, tuple[str, ...], str, bool]] = []
+        if "pyproject.toml" in files or "setup.py" in files or ".py" in suffixes:
+            candidates.append((Language.PYTHON, tuple(sorted(files & {"pyproject.toml", "setup.py", "requirements.txt"})), "python", False))
+        if "cargo.toml" in files or ".rs" in suffixes:
+            candidates.append((Language.RUST, ("Cargo.toml",), "cargo", False))
+        if "pom.xml" in files or "build.gradle" in files or ".java" in suffixes:
+            candidates.append((Language.JAVA, tuple(sorted(files & {"pom.xml", "build.gradle"})), "mvn", False))
+        if "cmakelists.txt" in files or suffixes & {".cpp", ".cc", ".cxx", ".hpp"}:
+            candidates.append((Language.CPP, ("CMakeLists.txt",), "cmake", False))
+        if "project.godot" in files or ".gd" in suffixes:
+            candidates.append((Language.GDSCRIPT, ("project.godot",), "godot", False))
+        if "package.json" in files and ".ts" in suffixes:
+            candidates.append((Language.TYPESCRIPT, ("package.json",), "npx", True))
+        elif "package.json" in files and ".js" in suffixes:
+            candidates.append((Language.JAVASCRIPT, ("package.json",), "node", False))
+        return tuple(
+            ToolchainDetection(language, markers, shutil.which(executable),
+                               shutil.which(executable) is not None, requires_network)
+            for language, markers, executable, requires_network in candidates
+        )
 
     def verify(self, path: Path) -> VerificationResult:
         language = self.detect_language(path)

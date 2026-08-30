@@ -41,6 +41,18 @@ def test_cancel_only_affects_pending_jobs(tmp_path):
     assert summary["cancelled"] == 1
 
 
+def test_queue_holds_mission_until_supervision_is_released(tmp_path):
+    queue = MissionQueue(tmp_path / "queue.json")
+    job = queue.enqueue("crea proyecto", "capability", "project.lead")
+
+    queue.await_supervision(job.id, "request-123")
+    assert queue.next() is None
+    assert queue.summary()["awaiting_supervision"] == 1
+
+    queue.release_supervision(job.id)
+    assert queue.next().id == job.id
+
+
 def test_corrupt_queue_recovers_empty(tmp_path):
     path = tmp_path / "queue.json"
     path.write_text("not json", encoding="utf-8")

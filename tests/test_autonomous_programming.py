@@ -102,6 +102,19 @@ def test_autonomous_coordinator_handles_architect_failure(tmp_path: Path):
     assert "arquitectura" in result.message.lower()
 
 
+def test_autonomous_coordinator_falls_back_for_calculator(tmp_path: Path):
+    client = FakeClient({})
+    coordinator = AutonomousProgrammingCoordinator(client, tmp_path)
+    result = coordinator.execute(
+        "Crea una calculadora simple en Python con interfaz de consola",
+        confirmed=True,
+    )
+    assert result.ok
+    assert result.proposal is not None
+    assert "def calculate" in result.proposal.source
+    assert "test_divide_by_zero_raises" in result.proposal.tests
+
+
 def test_specialist_registry_executes(tmp_path: Path):
     client = FakeClient({
         "default": '{"ok": true, "text": "hecho"}',

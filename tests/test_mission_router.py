@@ -1,9 +1,11 @@
 from igris_os.application import MissionRouter
+from igris_os.application.mission_router import (
+    is_creation_request, is_game_creation_request)
 
 
-def test_python_creation_routes_to_verified_developer():
+def test_python_creation_routes_to_project_staging():
     action = MissionRouter().route("crea un programa Python de tareas")
-    assert action.capability == "programming.python.develop"
+    assert action.capability == "project.stage"
     assert action.requires_confirmation
 
 
@@ -12,8 +14,40 @@ def test_game_creation_routes_to_godot():
     assert action.capability == "games.godot.scaffold"
 
 
+def test_typo_in_creation_verb_still_routes_to_game_creation():
+    request = ("quiero que contrullas un juego de ajedres animado en 3d "
+               "y lo pongas en una carpeta en el escritorio")
+
+    assert is_creation_request(request)
+    assert MissionRouter(use_llm_director=False).route(request).capability == "games.godot.scaffold"
+
+
+def test_polite_creation_question_is_an_order_not_a_capability_question():
+    request = "puedes crearme un juego de ajedrez en 3D animado?"
+
+    assert is_creation_request(request)
+    assert MissionRouter(use_llm_director=False).route(request).capability == "games.godot.scaffold"
+
+
+def test_noun_only_creation_follow_up_uses_delivery_details():
+    request = "UN JUEGO DE AJEDREZ, en el escritorio en una carpeta; nombre ajedrez 3D igris"
+
+    assert is_game_creation_request(request)
+
+
+def test_programming_conversation_is_not_a_creation_order():
+    for text in ("que tal programas?", "sabes programar?", "puedes programar?"):
+        assert not is_creation_request(text)
+
+
 def test_general_request_routes_to_chat():
     assert MissionRouter().route("explica la historia").kind == "chat"
+
+
+def test_sales_request_routes_to_commercial_planning():
+    action = MissionRouter().route("como promocionar IGRIS y hacerlo rentable")
+    assert action.capability == "sales.plan"
+    assert not action.requires_confirmation
 
 
 def test_attached_image_routes_to_resize():
@@ -142,3 +176,12 @@ def test_listening_question_routes_to_chat_not_voice():
 def test_explicit_voice_command_routes_to_voice():
     action = MissionRouter().route("di algo")
     assert action.capability == "voice.set"
+
+
+def test_programming_ability_question_uses_real_catalog():
+    router = MissionRouter(use_llm_director=False)
+    for question in ("puedes programar?", "sabes programar?",
+                     "puedes crear software?", "puedes crear juegos?"):
+        action = router.route(question)
+        assert action.kind == "capability"
+        assert action.capability == "system.capabilities"

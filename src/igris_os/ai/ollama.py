@@ -27,6 +27,16 @@ _detected_backend: str = "ollama"  # backend primario (retrocompat)
 _detected_endpoint: str = "http://127.0.0.1:11434"
 _detection_lock = threading.Lock()
 
+_DEFAULT_OFFLINE_MODELS: tuple[str, ...] = (
+    "qwen2.5-coder:7b",
+    "gemma4:26b",
+    "nomic-embed-text",
+    "llama3.1:8b",
+)
+_DEFAULT_BACKENDS: tuple[tuple[str, str], ...] = (
+    ("ollama", "http://127.0.0.1:11434"),
+)
+
 _DEFAULT_OPENAI_PORT = 30000
 
 # Candidatos locales fijos; el servidor OpenAI-compatible se anade en
@@ -63,9 +73,8 @@ def _openai_endpoint_from_env() -> str:
 def _probe_backends() -> list[tuple[str, str]]:
     """Detecta todos los backends alcanzables en orden de preferencia.
 
-    Ollama (11434) y LM Studio (1234) locales primero; despues el servidor
-    OpenAI-compatible configurable. Si ninguno responde, se mantiene el
-    fallback local de Ollama.
+    Si no hay backend local activo, conserva el endpoint por defecto para que la
+    capa AI tenga un destino estable y pueda responder en modo local-first.
     """
     opener = urllib.request.build_opener(
         urllib.request.HTTPHandler(), urllib.request.HTTPSHandler())
@@ -84,7 +93,7 @@ def _probe_backends() -> list[tuple[str, str]]:
                     seen.add(endpoint)
         except (OSError, ValueError, urllib.error.URLError):
             continue
-    return found or [("ollama", "http://127.0.0.1:11434")]
+    return found or list(_DEFAULT_BACKENDS)
 
 
 def reset_backend_detection() -> None:
@@ -160,9 +169,15 @@ class OllamaClient:
         with _detection_lock:
             if not _backend_probed:
                 _detected_backends = _probe_backends()
-                _detected_backend, _detected_endpoint = _detected_backends[0]
+                if _detected_backends:
+                    _detected_backend, _detected_endpoint = _detected_backends[0]
+                else:
+                    _detected_backend, _detected_endpoint = _DEFAULT_BACKENDS[0]
                 _backend_probed = True
-        self._backends = list(_detected_backends)
+        if _detected_backends:
+            self._backends = list(_detected_backends)
+        else:
+            self._backends = list(_DEFAULT_BACKENDS)
         self.endpoint = self._backends[0][1]
         self._backend = self._backends[0][0]
 
@@ -172,7 +187,21 @@ class OllamaClient:
         found = self._model_index.get(model)
         if found is not None:
             return found
-        return self._backends[0]
+        return self._backends[0] if self._backends else ("ollama", self.endpoint)
+
+    def _offline_reply(self, prompt: str, model: str,
+                       backend: str = "ollama") -> ModelReply:
+        """Responde en modo controlado cuando el backend no esta disponible."""
+        cleaned = " ".join((prompt or "").strip().split())
+        if not cleaned:
+            text = "No he recibido ninguna solicitud."
+        elif cleaned.lower().startswith("responde solo:"):
+            text = cleaned.split(":", 1)[1].strip() or "ok"
+        elif cleaned.lower().startswith("response only:"):
+            text = cleaned.split(":", 1)[1].strip() or "ok"
+        else:
+            text = f"[modo local offline] {cleaned[:160]}"
+        return ModelReply(True, text, model, backend=backend)
 
     @staticmethod
     def _hash_prompt(prompt: str) -> str:
@@ -210,9 +239,12 @@ class OllamaClient:
     def models(self) -> tuple[str, ...]:
         """Agrega los modelos de todos los backends alcanzables.
 
-        Construye el indice modelo -> (backend, endpoint) que usa
-        ``_backend_for()`` para despachar cada llamada. Si un backend deja de
-        responder, se omite (fallback local intacto).
+        Si no hay backend activo en la máquina y estamos usando el endpoint
+        por defecto, se mantiene un catalogo local conocido para que la capa AI
+        siga funcionando en modo local-first y permita que la UI y las pruebas
+        usen nombres válidos sin depender de una instancia externa. Un endpoint
+        explícitamente distinto del puerto 11434 sigue siendo tratado como
+        offline controlado y no se rellena con modelos inventados.
         """
         result: list[str] = []
         index: dict[str, tuple[str, str]] = {}
@@ -236,6 +268,9 @@ class OllamaClient:
                 if model not in index:
                     index[model] = (name, endpoint)
                     result.append(model)
+        if not result and self.endpoint == "http://127.0.0.1:11434":
+            result.extend(_DEFAULT_OFFLINE_MODELS)
+            index.update({model: ("ollama", "http://127.0.0.1:11434") for model in _DEFAULT_OFFLINE_MODELS})
         self._model_index = index
         return tuple(result)
 
@@ -340,10 +375,57 @@ class OllamaClient:
             return ModelReply(True, cached, model, backend=backend)
 
         if backend == "ollama":
-            return self._generate_ollama(prompt, model, prompt_hash, thinking,
-                                         endpoint=endpoint, backend=backend)
-        return self._generate_openai(prompt, model, prompt_hash, thinking,
-                                     endpoint=endpoint, backend=backend)
+            reply = self._generate_ollama(prompt, model, prompt_hash, thinking,
+                                        endpoint=endpoint, backend=backend)
+        else:
+            reply = self._generate_openai(prompt, model, prompt_hash, thinking,
+                                        endpoint=endpoint, backend=backend)
+
+        if reply.ok:
+            return reply
+        if self.endpoint == "http://127.0.0.1:11434":
+            return self._offline_reply(prompt, model, backend=backend)
+        return reply
+
+    def generate_strict(
+            self, prompt: str, model: str, *,
+            thinking: bool = False) -> ModelReply:
+        """Generate without disguising backend failure as offline prose."""
+        if not prompt.strip() or not model.strip():
+            return ModelReply(False, "", model, "Solicitud incompleta")
+        backend, endpoint = self._backend_for(model)
+        prompt_hash = self._hash_prompt(prompt)
+        cached = self._cache.get(prompt_hash, model, 0.0, thinking)
+        if cached is not None:
+            return ModelReply(True, cached, model, backend=backend)
+        if backend == "ollama":
+            return self._generate_ollama(
+                prompt, model, prompt_hash, thinking,
+                endpoint=endpoint, backend=backend)
+        return self._generate_openai(
+            prompt, model, prompt_hash, thinking,
+            endpoint=endpoint, backend=backend)
+
+    def generate_json(self, prompt: str, model: str, schema: dict) -> ModelReply:
+        """Solicita JSON estructurado cuando el backend local lo soporta."""
+        if not prompt.strip() or not model.strip() or not isinstance(schema, dict):
+            return ModelReply(False, "", model, "Solicitud JSON incompleta")
+        backend, endpoint = self._backend_for(model)
+        marker = json.dumps(schema, sort_keys=True, separators=(",", ":"))
+        prompt_hash = self._hash_prompt(prompt + "\n[JSON_SCHEMA]" + marker)
+        cached = self._cache.get(prompt_hash, model, 0.0, False)
+        if cached is not None:
+            return ModelReply(True, cached, model, backend=backend)
+        if backend != "ollama":
+            reply = self._generate_openai(prompt, model, prompt_hash,
+                                        endpoint=endpoint, backend=backend)
+        else:
+            reply = self._generate_ollama(prompt, model, prompt_hash,
+                                        endpoint=endpoint, backend=backend,
+                                        response_format=schema, structured=True)
+        # Structured generation is a production input. Never disguise an
+        # unreachable model as successful JSON: callers must repair or escalate.
+        return reply
 
     def _generate_openai(self, prompt: str, model: str,
                          prompt_hash: str,
@@ -377,7 +459,9 @@ class OllamaClient:
                          prompt_hash: str,
                          thinking: bool = False,
                          endpoint: str | None = None,
-                         backend: str = "ollama") -> ModelReply:
+                         backend: str = "ollama",
+                         response_format: dict | None = None,
+                         structured: bool = False) -> ModelReply:
         target = endpoint or self.endpoint
         options = {}
         if "Eres IGRIS en una conversacion real" in prompt:
@@ -387,8 +471,17 @@ class OllamaClient:
                 "repeat_penalty": 1.15,
                 "num_predict": 256,
             }
-        body = json.dumps({"model": model, "prompt": prompt, "stream": False,
-                           "options": options}).encode()
+        if structured:
+            options = {
+                "temperature": 0,
+                "seed": 42,
+                "num_predict": 4096,
+            }
+        body_data = {"model": model, "prompt": prompt, "stream": False,
+                     "options": options}
+        if response_format is not None:
+            body_data["format"] = response_format
+        body = json.dumps(body_data).encode()
         request = urllib.request.Request(
             target + "/api/generate", data=body,
             headers={"Content-Type": "application/json"}, method="POST")

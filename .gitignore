@@ -14,11 +14,9 @@ venv/
 env/
 
 # --- Runtime generado (evidencia local, no fuente) ---
-runtime/logs/
-runtime/audit/
-runtime/missions/
-runtime/context/
-runtime/training/
+runtime/
+progress/
+.bytecoder/
 
 # --- Datos y secretos ---
 *.db
@@ -47,3 +45,4 @@ desktop.ini
 .DS_Store
 .vscode/
 .idea/
+.aider*

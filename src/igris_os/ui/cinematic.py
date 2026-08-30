@@ -1,5 +1,6 @@
 import math
 import os
+import time
 from datetime import datetime
 from pathlib import Path
 import queue
@@ -29,6 +30,20 @@ from igris_os.ui.galaxia import GalaxiaWidget
 from igris_os.voice import WindowsVoice
 
 
+def is_capability_query(objective: str) -> bool:
+    """Preguntas que usan el catálogo real en vez de una respuesta del LLM."""
+    text = objective.casefold()
+    return any(phrase in text for phrase in (
+        "que funciones tienes", "qué funciones tienes",
+        "funciones de programacion", "funciones de programación",
+        "capacidades de programacion", "capacidades de programación",
+        "que puedes hacer", "qué puedes hacer",
+        "puedes programar", "sabes programar", "saves programar",
+        "puedes crear software", "puedes crear programas",
+        "puedes crear juegos",
+    ))
+
+
 def asset_path(name):
     base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[3]))
     path = base / "assets" / name
@@ -42,6 +57,37 @@ def runtime_root():
 
 
 def format_result(data):
+    if data.get("staged_project") and not data.get("project"):
+        return ("\n[STAGING VERIFICADO]\n" + str(data["staged_project"]) +
+                "\nEsperando autorización de entrega.")
+    if data.get("questions"):
+        return "\n[DATOS NECESARIOS]\n" + "\n".join(
+            "• " + str(question) for question in data["questions"])
+    if data.get("project_plan"):
+        plan = data["project_plan"]
+        phases = "\n".join(
+            "• " + str(item.get("name", "")) + ": " +
+            str(item.get("outcome", "")) + "\n  Puerta: " +
+            str(item.get("gate", ""))
+            for item in plan.get("phases", ()))
+        return ("\n[PLAN DE PROYECTO] " + str(plan.get("project", "")) +
+                "\n[FASES]\n" + phases +
+                "\n[RIESGOS]\n" + "\n".join(
+                    "• " + str(item) for item in plan.get("risks", ())) +
+                "\n[DEPENDENCIAS]\n" + "\n".join(
+                    "• " + str(item) for item in plan.get("dependencies", ())))
+    if data.get("sales_plan"):
+        plan = data["sales_plan"]
+        actions = "\n".join("• " + str(item) for item in plan.get("actions", ()))
+        assumptions = "\n".join(
+            "• " + str(item) for item in plan.get("assumptions", ()))
+        return ("\n[PLAN COMERCIAL] " + str(plan.get("product", "")) +
+                "\nCliente: " + str(plan.get("audience", "")) +
+                "\nCanal: " + str(plan.get("channel", "")) +
+                "\nMargen por venta: " + str(plan.get("contribution_margin", 0)) +
+                "\nPunto de equilibrio: " + str(plan.get("break_even_sales", 0)) +
+                " ventas\n[ACCIONES]\n" + actions +
+                "\n[SUPUESTOS]\n" + assumptions)
     if data.get("capabilities"):
         return "\n[CAPACIDADES ACTIVAS]\n" + "\n".join(
             "• " + str(item.get("description", item.get("name", "")))
@@ -109,7 +155,22 @@ def format_result(data):
                 "\n[CONFIRMACION REQUERIDA] " +
                 str(data.get("requires_confirmation", True)))
     if data.get("project"):
-        return "\n[PROYECTO ENTREGADO] " + str(data["project"])
+        project = Path(str(data["project"]))
+        files = ()
+        if project.is_dir():
+            files = tuple(sorted(
+                str(item.relative_to(project)).replace("\\", "/")
+                for item in project.rglob("*") if item.is_file()
+            ))
+        verification = "verificacion no confirmada"
+        verification_file = project / "VERIFICATION.json"
+        if verification_file.is_file():
+            verification = "VERIFICATION.json presente"
+        return ("\n[PROYECTO ENTREGADO]\n[UBICACION] " + str(project) +
+                "\n[ARCHIVOS]\n" + "\n".join(
+                    "• " + item for item in files) +
+                "\n[ESTADO] " + verification +
+                "\n[ORIGINAL] Sin modificar")
     if data.get("output"):
         return "\n[ARCHIVO GENERADO] " + str(data["output"])
     if data.get("outputs"):
@@ -135,8 +196,9 @@ def run_cinematic_panel():
         QPainter, QPen, QPixmap, QRadialGradient,
     )
     from PyQt6.QtWidgets import (
-        QApplication, QFileDialog, QFrame, QLabel, QMainWindow, QMessageBox,
-        QPushButton, QTextEdit, QWidget,
+        QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
+        QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit,
+        QMainWindow, QMessageBox, QPushButton, QTextEdit, QVBoxLayout, QWidget,
     )
 
     class PromptEdit(QTextEdit):
@@ -270,7 +332,7 @@ def run_cinematic_panel():
     class Panel(QMainWindow):
         def __init__(self):
             super().__init__()
-            self.setWindowTitle("IGRIS OS — Modo Militar")
+            self.setWindowTitle("IGRIS OS — Centro de Control")
             self.resize(1440, 810)
             self.setMinimumSize(1100, 619)
             icon = asset_path("igris_icon_v2.ico")
@@ -283,6 +345,7 @@ def run_cinematic_panel():
             self.replies = queue.Queue()
             self.progress_events = queue.Queue()
             self.backend_events = queue.Queue()
+            self.plan_events = queue.Queue()
             self.command_count = 0
             self.attachments = []
             self.assistant = None
@@ -297,6 +360,8 @@ def run_cinematic_panel():
             self._last_models: tuple = ()
             self._last_backend = ""
             self._last_model = ""
+            self._samadmin_requests = {}
+            self._last_samadmin_poll = 0.0
             self.canvas = Canvas()
             self.setCentralWidget(self.canvas)
             self.canvas.setAcceptDrops(True)
@@ -358,7 +423,7 @@ def run_cinematic_panel():
                 "padding:18px;} QScrollBar:vertical{width:8px;background:transparent;}"
                 "QScrollBar::handle:vertical{background:#65101e;border-radius:4px;}")
             self.chat.setPlainText(
-                "[IGRIS] IGRIS OS v4.0 en linea.\nA tus ordenes.\n\n"
+                "[IGRIS] IGRIS OS en línea.\nSistema productivo preparado.\n\n"
                 "[SISTEMA] Escribe una orden. Shift+Enter crea otra linea.")
             self.canvas.place(self.chat, 1110, 120, 435, 610)
 
@@ -394,19 +459,24 @@ def run_cinematic_panel():
                 "color:#ffd98a;background:transparent;")
             self.canvas.place(self.backend_label, 286, 847, 660, 30)
 
-            invisible = (
-                "QPushButton{background:transparent;color:transparent;border:none;}"
-                "QPushButton:hover{background:rgba(209,17,36,35);"
-                "border:1px solid rgba(255,70,86,90);border-radius:10px;}")
+            menu_style = (
+                "QPushButton{background:rgba(7,8,13,235);color:#e9e9ef;"
+                "text-align:left;padding-left:28px;border:1px solid rgba(120,25,42,150);"
+                "border-radius:11px;font-size:14px;font-weight:700;}"
+                "QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+                "stop:0 #8d142b,stop:0.75 #3c0b16,stop:1 #13070c);color:white;"
+                "border:1px solid #ff4965;}"
+                "QPushButton:pressed{background:#bc1e3b;}")
             menu = (
-                ("Modo Militar", 152, self.show_military),
-                ("Laboratorio", 234, self.show_laboratory),
-                ("Academia", 318, self.show_academy),
-                ("Memoria", 402, self.show_memory),
+                ("⚙  PROPIEDADES", 152, self.show_properties),
+                ("◈  PROYECTOS", 234, self.show_projects),
+                ("▣  ACADEMIA", 318, self.show_academy),
+                ("✚  DIAGNÓSTICO", 402, self.show_integrity),
             )
             for title, y, callback in menu:
                 button = QPushButton(title, self.canvas)
-                button.setStyleSheet(invisible)
+                button.setCursor(Qt.CursorShape.PointingHandCursor)
+                button.setStyleSheet(menu_style)
                 button.clicked.connect(callback)
                 self.canvas.place(button, 12, y, 242, 68)
 
@@ -450,11 +520,11 @@ def run_cinematic_panel():
                 "rgba(255,72,92,195);border-radius:15px;}")
             self.canvas.place(stat_frame, 312, 708, 738, 145)
             labels = (
-                ("NÚCLEO", 100, "#d11124", "%"),
+                ("ACTIVIDAD", 0, "#d11124", "%"),
                 ("MEMORIA", 0, "#d89a45", "%"),
-                ("ENERGÍA", 100, "#e03038", "%"),
-                ("SEGURIDAD", 100, "#39d06b", "%"),
-                ("VOZ", 0, "#b9b9c2", ""),
+                ("PROCESADO", 0, "#e03038", "%"),
+                ("RAZONAR", 0, "#39d06b", "%"),
+                ("VOZ", 0, "#b9b9c2", "%"),
                 ("COMANDOS", 0, "#666975", ""),
             )
             self.dials = []
@@ -481,10 +551,13 @@ def run_cinematic_panel():
                 memory = round(psutil.virtual_memory().percent)
             except (OSError, psutil.Error):
                 return
-            self.dials[0].set_value(cpu)
+            activity = round(max(cpu, getattr(self.galaxy, "ia_activity", 0) * 100))
+            reasoning = 85 if self.active_job is not None else round(
+                getattr(self.galaxy, "ia_activity", 0) * 100)
+            self.dials[0].set_value(activity)
             self.dials[1].set_value(memory)
-            self.dials[2].set_value(max(0, 100 - cpu))
-            self.dials[3].set_value(100)
+            self.dials[2].set_value(cpu)
+            self.dials[3].set_value(reasoning)
             self.dials[4].set_value(100 if self.voice_enabled else 0)
 
         def _refresh_backend(self):
@@ -542,6 +615,25 @@ def run_cinematic_panel():
                     self.finish_message("Servicios aun inicializando.", False)
                 else:
                     self._submit_self_diagnostic(objective)
+                return
+            if self._is_capability_query(objective):
+                if self.kernel is None:
+                    self.finish_message("Servicios aun inicializando.", False)
+                else:
+                    self._submit_capability_query(objective)
+                return
+            from igris_os.application.mission_router import is_creation_request
+            if is_creation_request(objective):
+                if self.assistant is None or self.director is None:
+                    self.finish_message(
+                        "Servicios aún inicializando, intenta de nuevo en unos segundos.",
+                        False)
+                    return
+                self.status.setText("● Estado: Interpretando encargo de creación")
+                self.galaxy.set_busy(True)
+                threading.Thread(
+                    target=self._plan_in_background, args=(objective,),
+                    daemon=True).start()
                 return
             if self.assistant is not None and self.assistant._is_conversation(
                     objective.casefold()):
@@ -613,6 +705,31 @@ def run_cinematic_panel():
 
             threading.Thread(target=_check, daemon=True).start()
 
+        @staticmethod
+        def _is_capability_query(objective: str) -> bool:
+            return is_capability_query(objective)
+
+        def _submit_capability_query(self, objective: str):
+            self.status.setText("● Estado: Consultando capacidades")
+            self.status.setStyleSheet("color:#55dc76;background:transparent;")
+            self.galaxy.set_busy(True)
+
+            def _check():
+                try:
+                    result = self.kernel.execute(
+                        Mission(objective), "system.capabilities", {})
+                    from igris_os.application.assistant import AssistantReply
+                    reply = AssistantReply(
+                        ok=result.ok,
+                        text=result.message,
+                        model="local", tokens=0, data=result.data)
+                except Exception as exc:
+                    from igris_os.application.assistant import AssistantReply
+                    reply = AssistantReply(False, str(exc), model="local")
+                self.replies.put((None, reply))
+
+            threading.Thread(target=_check, daemon=True).start()
+
         def _is_greeting(self, text: str) -> bool:
             return is_conversational_input(text)
 
@@ -625,8 +742,10 @@ def run_cinematic_panel():
                     objective=objective,
                     branch=MissionBranch.GENERAL,
                     deliverables=(objective,))
-            from PyQt6.QtCore import QTimer
-            QTimer.singleShot(0, lambda: self._on_plan_ready(plan, objective))
+            # No se puede crear un QTimer sin receptor desde este hilo: el
+            # callback quedaría asociado a un hilo sin event loop y la misión
+            # desaparecería. ``tick`` consume esta cola en el hilo Qt.
+            self.plan_events.put((plan, objective))
 
         def _on_plan_ready(self, plan, objective: str):
             preview = plan.deliverables[:3] if plan.deliverables else (plan.objective,)
@@ -638,19 +757,45 @@ def run_cinematic_panel():
             try:
                 action = self._route_with_plan(plan, objective)
                 if action.kind == "capability":
+                    payload = dict(action.payload or {})
+                    if action.capability in {"games.godot.scaffold", "project.stage"}:
+                        brief = self._collect_creation_brief(
+                            objective, payload,
+                            kind=("juego" if action.capability ==
+                                  "games.godot.scaffold" else "aplicación"))
+                        if brief is None:
+                            self.finish_message("Creación cancelada.", False)
+                            return
+                        payload.update(brief)
+                    if action.capability == "sales.plan":
+                        sales = self._collect_sales_brief()
+                        if sales is None:
+                            self.finish_message("Plan comercial cancelado.", False)
+                            return
+                        payload["answers"] = sales
                     answer = QMessageBox.StandardButton.Yes
                     if action.requires_confirmation:
                         answer = QMessageBox.question(
                             self, "Confirmar misión",
-                            "IGRIS creará archivos en un workspace aislado. ¿Continuar?")
+                            "IGRIS creará y verificará archivos en un workspace aislado. "
+                            "Después entregará la copia en la carpeta elegida. ¿Continuar?")
                     if answer != QMessageBox.StandardButton.Yes:
                         self.finish_message("Operación cancelada.", False)
                         return
-                    payload = dict(action.payload or {})
                     payload["__approval"] = self.kernel.issue_approval(
                         objective, action.capability)
                     job = self.mission_queue.enqueue(
                         objective, "capability", action.capability, payload)
+                    if self._uses_samadmin():
+                        request_id = payload["__approval"]
+                        self.mission_queue.await_supervision(job.id, request_id)
+                        self._samadmin_requests[request_id] = job.id
+                        self.chat.append(
+                            "[SAMADMIN] Solicitud " + request_id[:12] +
+                            " pendiente para " + action.capability + ".")
+                        self.status.setText("● Estado: Esperando Samadmin")
+                        self.status.setStyleSheet("color:#ffbe55;background:transparent;")
+                        return
                 else:
                     job = self.mission_queue.enqueue(objective, "chat")
                 pending = self.mission_queue.summary()["pending"]
@@ -660,10 +805,206 @@ def run_cinematic_panel():
                 return
             self.dispatch_next()
 
+        def _uses_samadmin(self) -> bool:
+            try:
+                from igris_os.samadmin import SamadminApprovalAuthority
+                return isinstance(self.kernel.approval, SamadminApprovalAuthority)
+            except Exception:
+                return False
+
+        def _poll_samadmin(self) -> None:
+            if not self._samadmin_requests or not self._uses_samadmin():
+                return
+            now = time.monotonic()
+            if now - self._last_samadmin_poll < 1.0:
+                return
+            self._last_samadmin_poll = now
+            authority = self.kernel.approval
+            for request_id, job_id in tuple(self._samadmin_requests.items()):
+                try:
+                    status = authority.client.status(request_id).get("status", "")
+                    if status == "approved":
+                        self.mission_queue.release_supervision(job_id)
+                        self.chat.append("[SAMADMIN] Solicitud " + request_id[:12] + " aprobada.")
+                        del self._samadmin_requests[request_id]
+                    elif status in {"rejected", "consumed"}:
+                        self.mission_queue.finish(
+                            job_id, False, "Samadmin " + status + " la solicitud")
+                        self.chat.append("[SAMADMIN] Solicitud " + request_id[:12] + " " + status + ".")
+                        del self._samadmin_requests[request_id]
+                except (ConnectionError, OSError, ValueError):
+                    continue
+
+        def _queue_project_delivery(self, staged_job, data: dict) -> None:
+            if not bool(data.get("verified")):
+                self.chat.append(
+                    "[SEGURIDAD] El staging no tiene evidencia verificable; no se entregará.")
+                return
+            staged = str(data.get("staged_project", "")).strip()
+            answers = staged_job.payload.get("answers", {})
+            if not staged or not isinstance(answers, dict):
+                return
+            answer = QMessageBox.question(
+                self, "Autorizar entrega verificada",
+                "El proyecto superó el staging. IGRIS copiará esta ruta:\n\n"
+                + staged +
+                "\n\nLa copia no sobrescribirá destinos existentes. ¿Autorizar una vez?")
+            if answer != QMessageBox.StandardButton.Yes:
+                self.chat.append(
+                    "[SEGURIDAD] Entrega cancelada; el staging se conserva para revisión.")
+                return
+            payload = {
+                "objective": staged_job.objective,
+                "answers": dict(answers),
+                "staged_project": staged,
+            }
+            payload["__approval"] = self.kernel.issue_approval(
+                staged_job.objective, "project.deliver")
+            delivery = self.mission_queue.enqueue(
+                staged_job.objective, "capability", "project.deliver", payload)
+            if self._uses_samadmin():
+                request_id = payload["__approval"]
+                self.mission_queue.await_supervision(delivery.id, request_id)
+                self._samadmin_requests[request_id] = delivery.id
+                self.chat.append(
+                    "[SAMADMIN] Entrega " + request_id[:12] +
+                    " pendiente para el staging verificado.")
+            else:
+                self.chat.append("[COLA] Entrega " + delivery.id[:8] + " registrada.")
+
+        def _collect_creation_brief(self, objective: str, payload: dict,
+                                    *, kind: str):
+            """Recoge las decisiones de entrega antes de generar archivos."""
+            from igris_os.application.mission_router import _project_name
+
+            dialog = QDialog(self)
+            is_game = kind == "juego"
+            dialog.setWindowTitle("Configurar proyecto de " + kind)
+            layout = QVBoxLayout(dialog)
+            layout.addWidget(QLabel(
+                "Indica solo las decisiones que afectan a la entrega."))
+            form = QFormLayout()
+            name = QLineEdit(str(payload.get("name") or _project_name(objective)))
+            delivery = QComboBox()
+            if is_game:
+                delivery.addItem("Código fuente Godot", "source")
+                delivery.addItem("Código fuente y ejecutable Windows", "source_and_exe")
+                delivery.setCurrentIndex(1)
+            else:
+                delivery.addItem("Intentar código Python; entregar solo si verifica", "source")
+            acceptance = QLineEdit(
+                "El proyecto inicia; tablero 3D animado; reglas de ajedrez funcionales"
+                if is_game else
+                "La aplicación inicia; función principal operativa; pruebas aprobadas")
+            acceptance.setPlaceholderText("Ejemplo: crear tareas; listar tareas; pruebas pasan")
+            candidates = (
+                Path(os.environ.get("OneDrive", "")) / "Escritorio",
+                Path(os.environ.get("OneDrive", "")) / "Desktop",
+                Path.home() / "Desktop", Path.home() / "Documents")
+            suggested = next((item for item in candidates if item.is_dir()), Path.home())
+            destination = QLineEdit(str(suggested))
+            browse = QPushButton("Examinar...")
+            destination_row = QHBoxLayout()
+            destination_row.addWidget(destination)
+            destination_row.addWidget(browse)
+            shortcut = QCheckBox("Crear acceso directo si se entrega un ejecutable")
+            shortcut.setVisible(is_game)
+            form.addRow("Nombre:", name)
+            form.addRow("Entrega:", delivery)
+            form.addRow("Carpeta:", destination_row)
+            form.addRow("Debe comprobarse:", acceptance)
+            form.addRow("", shortcut)
+            layout.addLayout(form)
+            buttons = QDialogButtonBox(
+                QDialogButtonBox.StandardButton.Ok |
+                QDialogButtonBox.StandardButton.Cancel)
+            layout.addWidget(buttons)
+
+            def choose_destination():
+                selected = QFileDialog.getExistingDirectory(
+                    dialog, "Selecciona la carpeta de entrega", destination.text())
+                if selected:
+                    destination.setText(selected)
+
+            browse.clicked.connect(choose_destination)
+            buttons.accepted.connect(dialog.accept)
+            buttons.rejected.connect(dialog.reject)
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return None
+            root = Path(destination.text()).expanduser()
+            if (not name.text().strip() or not root.is_dir() or
+                    not acceptance.text().strip()):
+                QMessageBox.warning(
+                    self, "Configuración incompleta",
+                    "Indica nombre, carpeta de entrega y criterios comprobables.")
+                return None
+            if not is_game:
+                return {
+                    "answers": {
+                        "name": name.text().strip(),
+                        "technology": "python",
+                        "delivery": str(delivery.currentData()),
+                        "destination": str(root.resolve()),
+                        "acceptance": acceptance.text().strip(),
+                    },
+                }
+            return {
+                "name": name.text().strip(),
+                "delivery_type": str(delivery.currentData()),
+                "delivery_root": str(root.resolve()),
+                "generate_full_code": True,
+                "brief": {
+                    "objective": objective,
+                    "delivery_type": str(delivery.currentData()),
+                    "shortcut_requested": is_game and shortcut.isChecked(),
+                },
+            }
+
+        def _collect_sales_brief(self):
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Configurar plan comercial")
+            layout = QVBoxLayout(dialog)
+            layout.addWidget(QLabel(
+                "Los cálculos se basan solo en los datos que indiques."))
+            form = QFormLayout()
+            fields = {}
+            labels = (
+                ("product", "Producto o servicio:"),
+                ("audience", "Cliente objetivo:"),
+                ("channel", "Canal inicial:"),
+                ("price", "Precio por venta:"),
+                ("variable_cost", "Coste variable por venta:"),
+                ("fixed_cost", "Costes fijos mensuales:"),
+                ("acquisition_budget", "Presupuesto inicial de captación:"),
+            )
+            for key, label in labels:
+                field = QLineEdit("0" if key == "acquisition_budget" else "")
+                fields[key] = field
+                form.addRow(label, field)
+            layout.addLayout(form)
+            buttons = QDialogButtonBox(
+                QDialogButtonBox.StandardButton.Ok |
+                QDialogButtonBox.StandardButton.Cancel)
+            layout.addWidget(buttons)
+            buttons.accepted.connect(dialog.accept)
+            buttons.rejected.connect(dialog.reject)
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return None
+            values = {key: field.text().strip() for key, field in fields.items()}
+            required = ("product", "audience", "channel", "price",
+                        "variable_cost", "fixed_cost")
+            if any(not values[key] for key in required):
+                QMessageBox.warning(
+                    self, "Datos incompletos",
+                    "Indica producto, cliente, canal, precio y costes.")
+                return None
+            return values
+
         def _route_with_plan(self, plan, objective: str):
             from igris_os.application.mission_router import (
                 RoutedAction, _programming_language, _dimensions,
-                _project_name, _game_genre)
+                is_game_creation_request, is_programming_creation_request,
+                is_sales_request, _project_name, _game_genre)
             from pathlib import Path as _P
             low = objective.casefold()
             if any(phrase in low for phrase in (
@@ -674,6 +1015,9 @@ def run_cinematic_panel():
                     "herramientas disponibles", "herramientas tienes",
                     "programas instalados")):
                 return RoutedAction("capability", "system.tools")
+            if is_sales_request(objective):
+                return RoutedAction("capability", "sales.plan",
+                                    {"objective": objective})
             source = str(_P(self.attachments[0]).resolve()) if self.attachments else ""
             if source and _P(source).is_dir() and any(phrase in low for phrase in (
                     "audita", "auditoria", "autodiagnostico del proyecto",
@@ -738,6 +1082,14 @@ def run_cinematic_panel():
                     "analiza", "revisa", "inspecciona", "resume", "archivos")):
                 return RoutedAction("capability", "files.inspect",
                                     {"sources": [str(_P(a).resolve()) for a in self.attachments]})
+            if is_game_creation_request(objective):
+                return RoutedAction("capability", "games.godot.scaffold",
+                                    {"name": _project_name(objective),
+                                     "genre": _game_genre(low)}, True)
+            if (is_programming_creation_request(objective) and
+                    _programming_language(low) == "python"):
+                return RoutedAction("capability", "project.lead",
+                                    {"objective": objective}, True)
             if plan.branch is MissionBranch.PROGRAMMING and "python" in low:
                 return RoutedAction("capability", "programming.python.develop",
                                     {"objective": objective}, True)
@@ -817,6 +1169,7 @@ def run_cinematic_panel():
             self.replies.put((job.id, reply))
 
         def tick(self):
+            self._poll_samadmin()
             try:
                 backends, models = self.backend_events.get_nowait()
             except queue.Empty:
@@ -827,6 +1180,12 @@ def run_cinematic_panel():
                 now = datetime.now().strftime("%H:%M:%S")
                 if self.clock.text() != now:
                     self.clock.setText(now)
+            try:
+                plan, objective = self.plan_events.get_nowait()
+            except queue.Empty:
+                pass
+            else:
+                self._on_plan_ready(plan, objective)
             try:
                 heard = self.voice_inputs.get_nowait()
             except queue.Empty:
@@ -890,6 +1249,9 @@ def run_cinematic_panel():
                     rendered = self.render_result(dict(data))
                     if rendered:
                         self.chat.append(rendered)
+                if (ok and data and self.active_job is not None and
+                        self.active_job.capability == "project.stage"):
+                    self._queue_project_delivery(self.active_job, dict(data))
                 if self.mission_queue is not None:
                     self.mission_queue.finish(job_id, ok, text)
             except Exception:
@@ -1001,19 +1363,19 @@ def run_cinematic_panel():
                 self.chat.append(f"\n[SISTEMA] Error inicializando servicios: {exc}")
             self.dispatch_next()
 
+        def show_properties(self):
+            from igris_os.ui.control_center import PropertiesDialog
+            PropertiesDialog(self.runtime, self).exec()
+
+        def show_projects(self):
+            from igris_os.ui.control_center import ProjectsDialog
+            ProjectsDialog(self).exec()
+
         def show_military(self):
-            self.plan_label.setVisible(not self.plan_label.isVisible())
+            self.show_properties()
 
         def show_laboratory(self):
-            events = self.kernel.audit.recent(8)
-            if not events:
-                self.chat.append("\n[LABORATORIO] Aún no hay misiones ejecutadas.")
-                return
-            lines = ["\n[LABORATORIO · MISIONES RECIENTES]"]
-            for event in events:
-                state = "OK" if event.get("ok") else event.get("code", "ERROR")
-                lines.append(f"• {event.get('capability', 'desconocida')} — {state}")
-            self.chat.append("\n".join(lines))
+            self.show_projects()
 
         def toggle_voice(self):
             self.voice_enabled = not self.voice_enabled
@@ -1038,9 +1400,12 @@ def run_cinematic_panel():
                     self.voice_engine.listen()), daemon=True).start()
 
         def show_academy(self):
-            self.chat.append(
-                "\n[ACADEMIA] Método IGRIS: analizar, construir, probar, "
-                "reparar y entregar evidencia.")
+            from igris_os.ui.control_center import AcademyDialog
+            AcademyDialog(self.runtime, self).exec()
+
+        def show_integrity(self):
+            from igris_os.ui.control_center import IntegrityDialog
+            IntegrityDialog(self).exec()
 
         def reset_view(self):
             cancelled = self.mission_queue.cancel_pending() if self.mission_queue else 0
@@ -1053,26 +1418,7 @@ def run_cinematic_panel():
                 f"Misiones pendientes canceladas: {cancelled}.")
 
         def show_memory(self):
-            if self.memory is None:
-                self.chat.append("\n[MEMORIA] Memoria aún no disponible.")
-                return
-            try:
-                rows = list(reversed(self.memory.recent("chat", limit=6)))
-                if not rows:
-                    self.chat.append("\n[MEMORIA] Sin recuerdos verificados.")
-                    return
-                summary = " | ".join(
-                    row["content"].get("role", "?") + ": " +
-                    row["content"].get("text", "")[:100] for row in rows)
-                self.chat.append("\n[MEMORIA] " + summary)
-                technical_count = self.memory.count("technical")
-                if technical_count:
-                    latest = self.memory.recent("technical", limit=1)[0]["content"]
-                    self.chat.append(
-                        f"\n[MEMORIA TÉCNICA] {technical_count} evidencias · última: "
-                        + latest.get("objective", "")[:120])
-            except Exception:
-                self.chat.append("\n[MEMORIA] Error leyendo memoria.")
+            self.show_integrity()
 
         def remember_repository_context(self, reply, job):
             if self.context_store is None:

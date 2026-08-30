@@ -1,10 +1,8 @@
-# Seguridad
+# Seguridad de IGRIS OS
 
-- Las capacidades destructivas estan bloqueadas.
-- Toda escritura declarada requiere confirmacion explicita.
-- Cada mision trabaja dentro de su propio directorio bajo `runtime/missions`.
-- Las rutas se validan por pertenencia real, no por coincidencia textual.
-- La auditoria no debe almacenar secretos ni contenido privado completo.
-- Este nucleo no ejecuta comandos arbitrarios. Esa capacidad se incorporara solo
-  con aislamiento del sistema operativo y pruebas adversariales.
-
+- Las acciones destructivas están bloqueadas por defecto.
+- Escribir, ejecutar, publicar o actuar externamente requiere permiso.
+- Los permisos son firmados, ligados a proyecto/capacidad, caducan y son de un uso.
+- El código generado usa Job Objects con límites de memoria, CPU, procesos y tiempo.
+- Un Job Object no sustituye una VM frente a código hostil: sin secretos ni red por defecto.
+- Ninguna entrega se marca completa sin salida cero y evidencia.

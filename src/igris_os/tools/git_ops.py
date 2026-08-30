@@ -38,7 +38,7 @@ class GitBranchInfo:
 
 
 class GitOperationError(Exception):
-    pass
+    """Excepción para errores de ejecución de comandos Git en Igris OS."""
 
 
 class GitRepository:
@@ -207,6 +207,6 @@ class MissionGitManager:
                 if len(parts) == 5:
                     commits.append(GitCommit(*parts, self.repo.current_branch()))
         except GitOperationError:
-            pass
+            commits = []
         diffs = self.diff_since_start()
         return MissionGitResult(self.repo.current_branch(), tuple(commits), diffs, message)

@@ -1,17 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Autoridad de aprobacion con tokens firmados (HMAC).
-
-Sustituye el booleano ``confirmed=True`` que cualquier codigo podia pasar para
-saltarse la confirmacion humana. Ahora una capacidad que requiere confirmacion
-solo se ejecuta si el kernel recibe un token emitido por esta autoridad, que:
-
-- vincula el token a un objetivo y una capacidad concretos (no es generico);
-- caduca a los ``ttl_seconds`` (por defecto 300 s);
-- se verifica en tiempo constante (``hmac.compare_digest``) contra manipulacion.
-
-La clave es HMAC simetrica por disponibilidad de stdlib; la separacion dura
-emisor/verificador (claves asimetricas) queda como endurecimiento futuro.
-"""
+"""Aprobaciones firmadas, vinculadas, caducables y de un solo uso."""
 
 from __future__ import annotations
 
@@ -22,32 +10,42 @@ import time
 
 
 class ApprovalAuthority:
-    """Emite y verifica tokens de aprobacion firmados."""
+    """Emite, verifica y consume tokens vinculados a una acción concreta."""
 
     def __init__(self, secret: bytes | None = None,
                  ttl_seconds: int = 300) -> None:
         self._secret = secret or secrets.token_bytes(32)
         self.ttl_seconds = ttl_seconds
+        self._consumed: set[str] = set()
 
     def issue(self, binding: str, capability: str) -> str:
-        """Emite un token vinculado a ``binding`` y ``capability``."""
         expires = int(time.time()) + self.ttl_seconds
-        payload = f"{binding}\n{capability}\n{expires}".encode("utf-8")
+        nonce = secrets.token_hex(16)
+        payload = f"{binding}\n{capability}\n{expires}\n{nonce}".encode("utf-8")
         signature = hmac.new(self._secret, payload, hashlib.sha256).hexdigest()
-        return f"{expires}.{signature}"
+        return f"{expires}.{nonce}.{signature}"
 
     def verify(self, token: str | None, binding: str,
                capability: str) -> bool:
-        """Comprueba que el token es valido para este binding y capacidad."""
         if not token:
             return False
         try:
-            expires_raw, signature = token.split(".", 1)
+            expires_raw, nonce, signature = token.split(".", 2)
             expires = int(expires_raw)
         except (ValueError, AttributeError):
             return False
         if time.time() > expires:
             return False
-        payload = f"{binding}\n{capability}\n{expires}".encode("utf-8")
+        payload = f"{binding}\n{capability}\n{expires}\n{nonce}".encode("utf-8")
         expected = hmac.new(self._secret, payload, hashlib.sha256).hexdigest()
         return hmac.compare_digest(signature, expected)
+
+    def consume(self, token: str | None, binding: str,
+                capability: str) -> bool:
+        """Valida y consume una aprobación, impidiendo su reutilización."""
+        if not token or token in self._consumed:
+            return False
+        if not self.verify(token, binding, capability):
+            return False
+        self._consumed.add(token)
+        return True

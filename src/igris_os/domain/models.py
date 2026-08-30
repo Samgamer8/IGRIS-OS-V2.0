@@ -72,8 +72,14 @@ class ExecutionResult:
         return cls(ok=True, code="SUCCESS", message=message, data=data)
 
     @classmethod
-    def failure(cls, message: str, code: str, stack_trace: str | None = None) -> ExecutionResult:
-        return cls(ok=False, code=code, message=message, stack_trace=stack_trace)
+    def failure(
+        cls, message: str, code: str, stack_trace: str | None = None,
+        *, data: dict[str, Any] | None = None,
+    ) -> ExecutionResult:
+        return cls(
+            ok=False, code=code, message=message, data=data or {},
+            stack_trace=stack_trace,
+        )
 
     @classmethod
     def denied(cls, reason: str) -> ExecutionResult:

@@ -69,6 +69,20 @@ class GodotRuntime:
         """Importa/compila los recursos de un proyecto en modo headless."""
         return self._run("--headless", "--path", str(project), "--import")
 
+    def check_script(self, project: Path, script: str | Path) -> GodotRun:
+        """Parse and type-check one script even when no scene references it."""
+        relative = Path(script).as_posix()
+        return self._run(
+            "--headless", "--path", str(project), "--check-only",
+            "--script", "res://" + relative)
+
+    def run_script(self, project: Path, script: str | Path) -> GodotRun:
+        """Execute a validation script so runtime-only API errors are observable."""
+        relative = Path(script).as_posix()
+        return self._run(
+            "--headless", "--path", str(project),
+            "--script", "res://" + relative)
+
     def run(self, project: Path, *, frames: int = 60,
             headless: bool = True,
             extra: tuple[str, ...] = ()) -> GodotRun:

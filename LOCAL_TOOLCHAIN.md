@@ -20,6 +20,7 @@
 - `EngineeringWorkflow`: confirmacion, allowlist, sandbox y evidencia.
 - `RepositoryDeveloper`: staging, cambios y rollback.
 - `MultiLanguageVerifier`: validacion por lenguaje.
+- `MultiLanguageVerifier.detect_project`: deteccion por estructura, sin instalar ni descargar dependencias.
 
 ## Reglas
 
@@ -28,3 +29,4 @@
 - Ninguna herramienta se ejecuta sin disponibilidad comprobada.
 - Ninguna capacidad declara exito sin evidencia.
 - Los modelos adicionales se incorporan solo despues de benchmark local.
+- `npx` se marca como sensible a red; no se ejecuta automaticamente en modo local-first.

@@ -69,3 +69,70 @@ def test_repository_developer_blocks_critical_preflight(tmp_path):
     assert result.diagnostics == ("preflight_critical",)
     assert "Preflight bloqueado" in result.message
     assert not (tmp_path / "workspace" / "escape.py").exists()
+
+
+def test_verify_staged_runs_tests_in_sandbox(tmp_path):
+    root = tmp_path / "staged"
+    root.mkdir()
+    (root / "app.py").write_text("value = 2\n", encoding="utf-8")
+    (root / "test_app.py").write_text(
+        "def test_value():\n    assert 2 == 2\n", encoding="utf-8")
+
+    result = RepositoryDeveloper(
+        FakeClient({}), tmp_path / "workspace", "fake").verify_staged(root)
+
+    assert result.ok
+    assert result.diagnostics == ("tests_passed",)
+    assert (root / "verification_report.txt").is_file()
+
+
+def test_verify_staged_rejects_failing_tests(tmp_path):
+    root = tmp_path / "staged"
+    root.mkdir()
+    (root / "test_app.py").write_text(
+        "def test_failure():\n    assert False\n", encoding="utf-8")
+
+    result = RepositoryDeveloper(
+        FakeClient({}), tmp_path / "workspace", "fake").verify_staged(root)
+
+    assert not result.ok
+    assert result.diagnostics == ("tests_failed",)
+
+
+def test_repair_until_verified_rolls_back_unverified_change(tmp_path):
+    root = tmp_path / "staged"
+    root.mkdir()
+    source = root / "app.py"
+    source.write_text("value = 1\n", encoding="utf-8")
+    (root / "test_app.py").write_text(
+        "def test_value():\n    assert False\n", encoding="utf-8")
+
+    result = RepositoryDeveloper(
+        FakeClient({}), tmp_path / "workspace", "fake").repair_until_verified(
+        root, "corrige el test", "assertion fallida", max_attempts=1)
+
+    assert not result.ok
+    assert result.diagnostics[0] == "rollback"
+    assert source.read_text(encoding="utf-8") == "value = 1\n"
+
+
+def test_repair_until_verified_accepts_passing_fix(tmp_path):
+    root = tmp_path / "staged"
+    root.mkdir()
+    (root / "app.py").write_text("value = 1\n", encoding="utf-8")
+    (root / "test_app.py").write_text(
+        "def test_value():\n    assert False\n", encoding="utf-8")
+
+    class RepairClient:
+        def generate(self, prompt, model):
+            return ModelReply(True, json.dumps({
+                "path": "test_app.py",
+                "content": "def test_value():\n    assert True\n",
+            }), model)
+
+    result = RepositoryDeveloper(
+        RepairClient(), tmp_path / "workspace", "fake").repair_until_verified(
+        root, "corrige el test", "assertion fallida", max_attempts=1)
+
+    assert result.ok
+    assert result.diagnostics == ("tests_passed",)

@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Sequence
+import re
+import unicodedata
 
 from igris_os.application.director import LLMMissionDirector, MissionDirector
 from igris_os.domain import Mission, MissionBranch
@@ -14,6 +16,68 @@ class RoutedAction:
     requires_confirmation: bool = False
 
 
+def _normalize_intent(text: str) -> str:
+    normalized = unicodedata.normalize("NFD", text.casefold())
+    normalized = "".join(
+        char for char in normalized if unicodedata.category(char) != "Mn")
+    return " ".join(re.sub(r"[^a-z0-9_]+", " ", normalized).split())
+
+
+def _has_creation_signal(text: str, object_markers: tuple[str, ...]) -> bool:
+    """Exige intención de producir algo; una pregunta de capacidad no basta."""
+    has_object = any(marker in text for marker in object_markers)
+    if not has_object:
+        return False
+    action = re.search(
+        r"\b(crea|crear|creame|construye|construir|contruye|contrullas|"
+        r"genera|generar|desarrolla|desarrollar|programa|haz|hazme|implementa)\b",
+        text)
+    explicit_request = any(phrase in text for phrase in (
+        "quiero que", "necesito que", "quiero un ", "quiero una ",
+        "me puedes hacer", "puedes hacerme", "puedes crearme",
+        "podrias hacerme", "podrias crearme"))
+    delivery_detail = any(phrase in text for phrase in (
+        "en el escritorio", "en una carpeta", "en la carpeta",
+        "guardalo en", "guarda en", "nombre ", "llamado ", "llamada "))
+    noun_follow_up = text.startswith(("un juego", "una aplicacion", "un programa",
+                                      "un videojuego", "una app"))
+    return bool(action or explicit_request or (delivery_detail and noun_follow_up))
+
+
+def is_game_creation_request(objective: str) -> bool:
+    """Reconoce encargos de juego sin depender de una clasificación del LLM."""
+    text = _normalize_intent(objective)
+    return _has_creation_signal(
+        text, ("juego", "videojuego", "ajedrez", "chess", "godot", "pygame"))
+
+
+def is_programming_creation_request(objective: str) -> bool:
+    """Detecta encargos de software antes de delegar la decisión al LLM."""
+    text = _normalize_intent(objective)
+    software_markers = (
+        "aplicacion", "app", "programa", "herramienta",
+        "script", "calculadora", "tablero", "pagina web",
+        "web", "bot", "editor", "gestor", "utilidad",
+    )
+    return _has_creation_signal(text, software_markers)
+
+
+def is_creation_request(objective: str) -> bool:
+    """Clasificador determinista común para separar charla de encargos."""
+    return (is_game_creation_request(objective)
+            or is_programming_creation_request(objective))
+
+
+def is_sales_request(objective: str) -> bool:
+    text = objective.casefold()
+    markers = (
+        "venta", "ventas", "vender", "promociona", "promocionar",
+        "marketing", "rentabilidad", "rentable", "clientes", "comercial",
+        "precio", "punto de equilibrio",
+    )
+    return any(marker in text for marker in markers)
+
+
 class MissionRouter:
     def __init__(self, *, use_llm_director: bool = True) -> None:
         self.use_llm_director = use_llm_director
@@ -22,6 +86,26 @@ class MissionRouter:
 
     def route(self, objective: str,
               attachments: Sequence[str] = ()) -> RoutedAction:
+        low = objective.casefold()
+        if any(phrase in low for phrase in (
+                "tus funciones", "tus capacidades", "qué puedes hacer",
+                "que puedes hacer", "capacidades tienes",
+                "puedes programar", "sabes programar", "saves programar",
+                "puedes crear software", "puedes crear programas",
+                "puedes crear juegos")):
+            return RoutedAction("capability", "system.capabilities")
+        if is_sales_request(objective):
+            return RoutedAction("capability", "sales.plan", {"objective": objective})
+        if is_game_creation_request(objective):
+            return RoutedAction(
+                "capability", "games.godot.scaffold",
+                {"name": _project_name(objective),
+                 "genre": _game_genre(objective.casefold())}, True)
+        if (is_programming_creation_request(objective) and
+            _programming_language(objective.casefold()) == "python"):
+            return RoutedAction(
+                "capability", "project.stage",
+                {"objective": objective}, True)
         if len(objective.split()) < 5:
             cache_key = hash(objective) % 10000
             if cache_key in self._plan_cache:
@@ -36,10 +120,12 @@ class MissionRouter:
                 self._plan_cache[cache_key] = result
                 return result
         plan = self.director.plan(Mission(objective))
-        low = objective.casefold()
         if any(phrase in low for phrase in (
                 "tus funciones", "tus capacidades", "qu\u00e9 puedes hacer",
-                "que puedes hacer", "capacidades tienes")):
+                "que puedes hacer", "capacidades tienes",
+                "puedes programar", "sabes programar", "saves programar",
+                "puedes crear software", "puedes crear programas",
+                "puedes crear juegos")):
             return RoutedAction("capability", "system.capabilities")
         if any(phrase in low for phrase in (
                 "herramientas disponibles", "herramientas tienes",
@@ -118,7 +204,7 @@ class MissionRouter:
             return RoutedAction(
                 "capability", "games.godot.export", {}, True)
         if plan.branch is MissionBranch.GAMES and any(
-                word in low for word in ("crea", "construye", "genera")):
+            word in low for word in ("crea", "construye", "genera")):
             return RoutedAction(
                 "capability", "games.godot.scaffold",
                 {"name": _project_name(objective),
@@ -163,9 +249,16 @@ def _dimensions(text: str) -> tuple[int, int]:
 
 
 def _project_name(objective: str) -> str:
+    explicit = re.search(r"\bnombre\s*[:;,-]?\s*(.+)$", objective,
+                         flags=re.IGNORECASE)
+    if explicit:
+        name = explicit.group(1).strip(" .,;:!?")
+        if name:
+            return name[:80]
     words = [word.strip(".,;:!?") for word in objective.split()]
     ignored = {"crea", "construye", "genera", "un", "una", "juego",
-               "videojuego", "en", "godot"}
+               "videojuego", "en", "godot", "puedes", "crearme", "hacerme",
+               "quiero", "que", "me", "el", "la", "de"}
     useful = [word for word in words if word.casefold() not in ignored]
     return " ".join(useful[:5]) or "Juego IGRIS"
 
@@ -175,4 +268,4 @@ def _game_genre(text: str) -> str:
         return "platformer"
     if any(word in text for word in ("arcade", "maquinas recreativas")):
         return "arcade"
-    return "top_down"
+    return "top_down"

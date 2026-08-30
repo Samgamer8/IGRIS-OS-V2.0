@@ -1,3 +1,4 @@
+import os
 import subprocess
 import re
 import threading
@@ -7,6 +8,26 @@ from pathlib import Path
 
 
 POWERSHELL = "powershell.exe"
+
+
+def _powershell_startupinfo() -> object | None:
+    if os.name != "nt" or not hasattr(subprocess, "STARTUPINFO"):
+        return None
+    info = subprocess.STARTUPINFO()
+    info.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 0)
+    info.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+    return info
+
+
+def _powershell_kwargs(**kwargs):
+    hidden = _powershell_startupinfo()
+    if hidden is None:
+        return kwargs
+    merged = dict(kwargs)
+    merged.setdefault("startupinfo", hidden)
+    if hasattr(subprocess, "CREATE_NO_WINDOW"):
+        merged.setdefault("creationflags", subprocess.CREATE_NO_WINDOW)
+    return merged
 
 
 SPEAK = (
@@ -73,12 +94,13 @@ class WindowsVoice:
     def _ensure_resident(self):
         if self._resident is None or self._resident.poll() is not None:
             self._resident = subprocess.Popen(
-                ['powershell.exe', '-NoProfile', '-Command', self._RESIDENT_SCRIPT],
+                ['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', self._RESIDENT_SCRIPT],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 text=True,
                 encoding="ascii",
+                **_powershell_kwargs(),
             )
 
     @staticmethod
@@ -89,8 +111,9 @@ class WindowsVoice:
                 "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer;"
                 "$s.GetInstalledVoices()|%{$_.VoiceInfo.Name}")
             result = subprocess.run(
-                ["powershell.exe", "-NoProfile", "-Command", script],
+                ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
                 capture_output=True, text=True, timeout=10, check=False,
+                **_powershell_kwargs(),
             )
             if result.returncode == 0:
                 names = [line.strip() for line in result.stdout.splitlines() if line.strip()]
@@ -108,9 +131,10 @@ class WindowsVoice:
             "$s.PlaySync()")
         try:
             process = subprocess.Popen(
-                ["powershell.exe", "-NoProfile", "-Command", script,
+                ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script,
                  str(path.resolve())], stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL)
+                stderr=subprocess.DEVNULL,
+                **_powershell_kwargs())
             try:
                 process.wait(timeout=30)
             except subprocess.TimeoutExpired:
@@ -170,8 +194,9 @@ class WindowsVoice:
     def listen(self) -> str:
         try:
             run = subprocess.run(
-                ["powershell.exe", "-NoProfile", "-Command", LISTEN],
-                capture_output=True, text=True, encoding="utf-8", timeout=12)
+                ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", LISTEN],
+                capture_output=True, text=True, encoding="utf-8", timeout=12,
+                **_powershell_kwargs())
         except (OSError, subprocess.TimeoutExpired):
             return ""
         return run.stdout.strip() if run.returncode == 0 else ""
