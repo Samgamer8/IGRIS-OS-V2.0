@@ -41,16 +41,26 @@
 
 ```text
 C:\Users\samva\OneDrive\Escritorio\IGRIS OS V 5\
-├── IGRIS_MASTER_PROMPT.md         [LECTURA OBLIGATORIA]
-├── SESSION_CONTINUITY.md          [Este archivo]
-├── MIGRATION_MASTER_PLAN.md       [Plan 6-fases]
-├── AUDIT_DETAILED_MODULES.md      [Clasificación]
-├── QUICK_START_V5.md              [Guía operativa]
-├── MIGRATION_STATUS_SUMMARY.txt   [Resumen ejecutivo]
-├── src/igris_os/                  [PENDIENTE: copiar]
-├── tests/                          [PENDIENTE: copiar]
-└── docs/                           [PENDIENTE: copiar]
+├── IGRIS_MASTER_PROMPT.md              [LECTURA OBLIGATORIA - 12 secciones]
+├── SESSION_CONTINUITY.md               [Este archivo]
+├── ARQUITECTURA_EMPRESARIAL.md         [NUEVO - Jerarquía 5 capas]
+├── MIGRATION_MASTER_PLAN.md            [Plan 6-fases]
+├── AUDIT_DETAILED_MODULES.md           [Clasificación]
+├── QUICK_START_V5.md                   [Guía operativa]
+├── MIGRATION_STATUS_SUMMARY.txt        [Resumen ejecutivo]
+├── src/igris_os/                       [PENDIENTE: copiar]
+├── tests/                              [PENDIENTE: copiar]
+└── docs/                               [PENDIENTE: copiar]
 ```
+
+### Estructura Empresarial (5 capas):
+
+**NIVEL 0:** User/Admin (Sam)
+**NIVEL 1:** Presentation & Orchestration (Frontend + LangChain/CrewAI)
+**NIVEL 2:** Knowledge/Models/Tools (RAG + LLMs + MCP)
+**NIVEL 3:** Data Layer (PostgreSQL, Redis, S3, Qdrant)
+**NIVEL 4:** Observability & Evals (Langfuse, Phoenix, RAGAS)
+**NIVEL 5:** Deployment (Docker, K8s, Vercel, Cloudflare)
 
 ## 5. SIGUIENTE MICRO-PASO TÉCNICO INMEDIATO
 

@@ -400,7 +400,136 @@ Para entender decisiones históricas:
 
 
 ═══════════════════════════════════════════════════════════════════════════════════
-🔟1️⃣ CHECKLIST DE LECTURA (CONFIRMAR ANTES DE PROCEDER)
+1️⃣2️⃣ ARQUITECTURA EMPRESARIAL & ESTRUCTURA ORGANIZACIONAL
+═══════════════════════════════════════════════════════════════════════════════════
+
+IGRIS OS está diseñado como una EMPRESA COMPLETA, con capas especializadas y roles 
+definidos, tal como se estructuraría en una corporación real (IBM, Google, etc.).
+
+📊 JERARQUÍA COMPLETA (de arriba hacia abajo):
+
+┌─────────────────────────────────────────────────────────────────┐
+│           👤 LEVEL 0: USER/ADMIN REQUEST (Sam Admin)           │
+│     Punto de entrada único - Autorización & Decisiones        │
+└─────────────────────────────────────────────────────────────────┘
+                                ▼
+┌──────────────────────────────────────────────────────────────────┐
+│   🎨 LEVEL 1: PRESENTATION & ORCHESTRATION LAYER                │
+├──────────────────┬─────────────────────────────────────────────┤
+│ Frontend:        │ Agent Orchestration:                        │
+│  • React 19+     │  • LangChain (Framework core)              │
+│  • Next.js 15+   │  • CrewAI (Multi-agent system)             │
+│  • Streamlit     │  • Mastra (Workflow engine)                │
+│  • Tailwind CSS  │  • Langsmith (Debug & monitoring)          │
+└──────────────────┴─────────────────────────────────────────────┘
+                        ▼
+    ┌───────────────┬──────────────────┬─────────────────┐
+    ▼               ▼                  ▼                 ▼
+┌──────────────┐┌──────────────┐ ┌──────────────┐ ┌──────────┐
+│ 📚 Knowledge │ │ 🧠 Models   │ │ 🔧 Tools    │ │          │
+│ Layer (RAG)  │ │ (LLMs)      │ │ (MCP)       │ │          │
+│              │ │             │ │             │ │          │
+│ • Documents  │ │ • Claude 3.7│ │ • GitHub    │ │          │
+│ • Vector DB  │ │ • GPT-5.x   │ │ • Slack     │ │          │
+│ • Memory     │ │ • Gemini    │ │ • Browser   │ │          │
+│ • Retrieval  │ │ • Llama 3.2 │ │ • APIs      │ │          │
+│ • Indexing   │ │ • Mixtral   │ │ • Database  │ │          │
+│              │ │ • Ollama    │ │ • Custom    │ │          │
+└──────────────┘└──────────────┘ └──────────────┘ │          │
+                                                   └──────────┘
+                            ▼
+            ┌────────────────────────────────────┐
+            │  💾 LEVEL 3: DATA LAYER           │
+            │  ├─ PostgreSQL 16+ (Relational)   │
+            │  ├─ Redis 7+ (Cache/Session)      │
+            │  ├─ S3/Storage (Object store)     │
+            │  ├─ Qdrant 1.7+ (Vector search)  │
+            │  └─ Elasticsearch (Full-text)     │
+            └────────────────────────────────────┘
+                            ▼
+            ┌────────────────────────────────────┐
+            │ 📊 LEVEL 4: OBSERVABILITY         │
+            │  ├─ Langfuse (Prompt mgmt)        │
+            │  ├─ Phoenix (LLM telemetry)       │
+            │  ├─ RAGAS (RAG evaluation)        │
+            │  ├─ Prometheus (Metrics)          │
+            │  └─ Grafana (Dashboards)          │
+            └────────────────────────────────────┘
+                            ▼
+            ┌────────────────────────────────────┐
+            │ 🚀 LEVEL 5: DEPLOYMENT            │
+            │  ├─ Docker 26+ (Containers)       │
+            │  ├─ Kubernetes 1.31+ (Orch.)      │
+            │  ├─ Vercel (Edge deployment)      │
+            │  ├─ Cloudflare (CDN/Workers)      │
+            │  └─ CI/CD: GitHub Actions         │
+            └────────────────────────────────────┘
+
+🎯 RESPONSABILIDADES POR CAPA:
+
+LEVEL 0 - User/Admin:
+  → Autorización de releases
+  → Decisiones arquitectónicas
+  → Gestión de configuración global
+  → Supervisión estratégica
+
+LEVEL 1 - Frontend & Orchestration:
+  Frontend:
+    → Interfaz responsive
+    → Real-time updates
+    → State management
+    → User experience
+  
+  Orchestration:
+    → Coordinar agentes
+    → Ejecutar workflows
+    → Gestionar contexto
+    → Error recovery
+
+LEVEL 2 - Knowledge, Models & Tools:
+  Knowledge:
+    → Ingestión de documentos
+    → Indexación en vector DB
+    → Búsqueda relevante
+    → Deduplicación
+  
+  Models:
+    → Seleccionar modelo óptimo
+    → Gestionar tokens/costos
+    → Implementar fallbacks
+    → Fine-tuning
+  
+  Tools (MCP):
+    → Exponer herramientas
+    → Validar llamadas
+    → Manejo de errores
+    → Rate limiting
+
+LEVEL 3 - Data:
+  → Persistencia ACID
+  → Escalabilidad horizontal
+  → Backup & recovery
+  → Encryption
+  → Data governance
+
+LEVEL 4 - Observability:
+  → Monitorear latencias
+  → Evaluar calidad
+  → Detectar anomalías
+  → SLA compliance
+
+LEVEL 5 - Deployment:
+  → Deployments sin downtime
+  → Auto-scaling
+  → Disaster recovery
+  → Security hardening
+
+📁 VER ARCHIVO COMPLETO: ARQUITECTURA_EMPRESARIAL.md
+   (Documentación detallada por capas, tecnologías, y flujos)
+
+
+═══════════════════════════════════════════════════════════════════════════════════
+1️⃣3️⃣ CHECKLIST DE LECTURA (CONFIRMAR ANTES DE PROCEDER)
 ═══════════════════════════════════════════════════════════════════════════════════
 
 La IA debe confirmar QUE HA LEÍDO completamente:
@@ -416,6 +545,7 @@ La IA debe confirmar QUE HA LEÍDO completamente:
 ✅ [ ] Sección 8 - Dependencias externas
 ✅ [ ] Sección 9 - Checkpoints anteriores
 ✅ [ ] Sección 10 - Preguntas/ambigüedades
+✅ [ ] Sección 12 - Arquitectura Empresarial (NUEVA)
 
 Una vez completadas TODAS: proceder con confianza
 
