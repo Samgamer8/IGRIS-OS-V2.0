@@ -41,17 +41,28 @@ def synthesize(model, text: str, reference: Path, output: Path) -> None:
         model.prepare_conditionals(str(reference), exaggeration=0.5)
         model._igris_reference_signature = signature
     minimum_samples = max(1, int(model.sr * len(text.split()) / 6))
+    last_error: Exception | None = None
     for seed in (42, 43, 44):
         torch.manual_seed(seed)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(seed)
-        audio = model.generate(
-            text, language_id='es',
-            exaggeration=0.5, cfg_weight=0.5, temperature=0.8, repetition_penalty=1.2)
-        samples = audio.detach().cpu().numpy().reshape(-1)
+        try:
+            audio = model.generate(
+                text, language_id='es',
+                exaggeration=0.5, cfg_weight=0.5, temperature=0.8, repetition_penalty=1.2)
+            samples = audio.detach().cpu().numpy().reshape(-1)
+        except (RuntimeError, ValueError) as exc:
+            # Una semilla puede degenerar (p.ej. repeticion de token que fuerza
+            # un EOS temprano y deja un tensor interno vacio). No se descarta
+            # el intento completo: se prueba la siguiente semilla.
+            last_error = exc
+            continue
         if samples.size >= minimum_samples:
             soundfile.write(str(output), samples, model.sr, subtype='PCM_16')
             return
+    if last_error is not None:
+        raise ValueError(
+            'La sintesis fallo en todas las semillas de reintento: ' + str(last_error))
     raise ValueError('La sintesis genero audio demasiado corto; no se reproducira una respuesta incompleta')
 
 

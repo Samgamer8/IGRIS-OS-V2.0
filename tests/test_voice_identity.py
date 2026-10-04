@@ -133,6 +133,41 @@ class VoiceIdentityTests(unittest.TestCase):
             self.assertEqual(model.generate.call_count, 3)
             soundfile.write.assert_not_called()
 
+    def test_degenerate_seed_is_skipped_instead_of_failing_the_whole_request(self):
+        with TemporaryDirectory() as directory:
+            reference = Path(directory) / 'reference.wav'
+            reference.touch()
+            model = Mock(sr=24000)
+            full_audio = Mock()
+            samples = Mock(size=240000)
+            full_audio.detach.return_value.cpu.return_value.numpy.return_value.reshape.return_value = samples
+            # La primera semilla reproduce el fallo real observado: un error
+            # interno del modelo (p.ej. repeticion de token que fuerza un EOS
+            # temprano y deja un tensor vacio), no audio corto.
+            model.generate.side_effect = [
+                RuntimeError("max(): Expected reduction dim 1 to have non-zero size."),
+                full_audio,
+            ]
+            soundfile = Mock()
+            with patch.dict('sys.modules', {'soundfile': soundfile, 'torch': Mock()}):
+                synthesize(model, 'Una respuesta con varias palabras.', reference, Path(directory) / 'speech.wav')
+            self.assertEqual(model.generate.call_count, 2)
+            soundfile.write.assert_called_once()
+
+    def test_all_seeds_degenerating_raises_with_last_error_context(self):
+        with TemporaryDirectory() as directory:
+            reference = Path(directory) / 'reference.wav'
+            reference.touch()
+            model = Mock(sr=24000)
+            model.generate.side_effect = RuntimeError(
+                "max(): Expected reduction dim 1 to have non-zero size.")
+            soundfile = Mock()
+            with patch.dict('sys.modules', {'soundfile': soundfile, 'torch': Mock()}):
+                with self.assertRaisesRegex(ValueError, 'todas las semillas'):
+                    synthesize(model, 'Una respuesta con varias palabras.', reference, Path(directory) / 'speech.wav')
+            self.assertEqual(model.generate.call_count, 3)
+            soundfile.write.assert_not_called()
+
     def test_missing_reference_is_not_replaced_by_another_voice(self):
         model = Mock()
         with self.assertRaisesRegex(ValueError, 'referencia'):

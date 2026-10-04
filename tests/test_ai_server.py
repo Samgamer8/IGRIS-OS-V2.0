@@ -1,3 +1,5 @@
+import threading
+import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -113,6 +115,49 @@ class SharedServerRegistryTests(unittest.TestCase):
                 # El otro panel tambien cierra: ahora si debe apagarse.
                 with patch('os.getpid', return_value=99999):
                     self.assertEqual(registry.release(), 4321)
+
+    def test_concurrent_panels_do_not_double_start_native_server(self):
+        """Dos paneles arrancando a la vez no deben lanzar dos procesos
+        llama-server: el segundo debe esperar y sumarse al primero."""
+        with TemporaryDirectory() as directory:
+            model = Path(directory) / 'model.gguf'
+            model.write_bytes(b'GGUF')
+            executable = Path(directory) / 'llama-server.exe'
+            executable.touch()
+            registry = server.SharedServerRegistry(Path(directory) / '.igris_shared_server')
+            running = threading.Event()
+            start_calls = []
+            start_lock = threading.Lock()
+
+            class FakeNativeServer:
+                _proc = None
+
+                def __init__(self, *args, **kwargs):
+                    pass
+
+                def start(self, wait=45.0):
+                    with start_lock:
+                        start_calls.append(1)
+                    time.sleep(0.2)  # simula el tiempo real de carga del modelo
+                    running.set()
+                    return True
+
+            with patch.object(server, '_shared_registry', return_value=registry), \
+                 patch.dict('os.environ', {'IGRIS_PREFERRED_BACKEND': 'openai',
+                                           'IGRIS_NATIVE_EXECUTABLE': str(executable),
+                                           'IGRIS_NATIVE_MODEL_PATH': str(model)}), \
+                 patch.object(server, 'is_openai_running', side_effect=lambda *a, **k: running.is_set()), \
+                 patch.object(server, 'LlamaCppServer', FakeNativeServer), \
+                 patch.object(server, '_GLOBAL_SERVER', None):
+                results = []
+                threads = [threading.Thread(target=lambda: results.append(server.ensure_ollama_server(auto=True)))
+                          for _ in range(2)]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join(timeout=10)
+            self.assertEqual(len(start_calls), 1)
+            self.assertEqual(results, [True, True])
 
 
 if __name__ == '__main__':

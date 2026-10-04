@@ -120,8 +120,21 @@ class PanelModeTests(unittest.TestCase):
                             self.assertEqual(execution.capability, 'image.neural_sphere')
                             window.active_job = execution
                             window.run_job(execution)
+                            from igris_os.cognitive import CognitiveStateStore
+                            from igris_os.cognitive.models import IntentFrame
+                            window.cognitive_state = CognitiveStateStore(
+                                Path(directory) / 'cognitive_state.json')
+                            window.cognitive_state.record(
+                                request, IntentFrame(
+                                    domain='files', intent='inspect_files', mode='inspect',
+                                    goal='g', needs_clarification=True,
+                                    clarification_question='pendiente?'))
                             window.tick()
                             self.assertEqual(execution.state, 'completed', execution.message + '\n' + str(execution.result))
+                            context_after = window.cognitive_state.context()
+                            self.assertEqual(context_after['pending_domain'], '',
+                                              'finish_message(ok=True) debe limpiar el estado pendiente tras completar la mision')
+                            self.assertEqual(context_after['active_domain'], '')
                             self.assertTrue(Path(execution.result['artifact']['output']).is_file())
                             self.assertIn(execution.result['artifact']['output'], window.chat.toPlainText())
                             self.assertIn('no IA generativa', window.chat.toPlainText())

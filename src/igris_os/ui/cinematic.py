@@ -411,7 +411,9 @@ def run_cinematic_panel():
     class Panel(QMainWindow):
         def __init__(self):
             super().__init__()
-            self.setWindowTitle("IGRIS OS — Centro de Control")
+            _edition = os.environ.get("IGRIS_EDITION", "").strip()
+            self.setWindowTitle("IGRIS OS — Centro de Control" +
+                               (f" [{_edition}]" if _edition else ""))
             self.resize(1440, 810)
             self.setMinimumSize(1100, 619)
             icon = asset_path("igris_icon_v2.ico")
@@ -1909,6 +1911,11 @@ def run_cinematic_panel():
             return None
 
         def finish_message(self, text, ok):
+            if ok:
+                try:
+                    self.cognitive_state.clear_active()
+                except Exception:
+                    pass
             if text:
                 self.chat.append("\n[SISTEMA] " + text)
             self.galaxy.set_busy(False)

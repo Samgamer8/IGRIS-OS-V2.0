@@ -59,18 +59,19 @@ class SharedServerRegistry:
         self.mutex_file = directory / ".mutex"
 
     @contextlib.contextmanager
-    def _locked(self, timeout: float = 5.0):
+    def _locked(self, timeout: float = 5.0, mutex_file: Path | None = None, stale_after: float = 10.0):
+        mutex_file = mutex_file or self.mutex_file
         self.directory.mkdir(parents=True, exist_ok=True)
         deadline = time.monotonic() + timeout
         fd = None
         while fd is None:
             try:
-                fd = os.open(str(self.mutex_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                fd = os.open(str(mutex_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             except FileExistsError:
                 if time.monotonic() > deadline:
                     try:
-                        if time.time() - self.mutex_file.stat().st_mtime > 10:
-                            self.mutex_file.unlink(missing_ok=True)
+                        if time.time() - mutex_file.stat().st_mtime > stale_after:
+                            mutex_file.unlink(missing_ok=True)
                             continue
                     except FileNotFoundError:
                         continue
@@ -80,7 +81,21 @@ class SharedServerRegistry:
             yield
         finally:
             os.close(fd)
-            self.mutex_file.unlink(missing_ok=True)
+            mutex_file.unlink(missing_ok=True)
+
+    def start_lock(self, timeout: float = 70.0):
+        """Bloqueo exclusivo entre procesos mientras el servidor arranca.
+
+        Evita que dos paneles (IGRIS OS e IGRIS OS ibrido) comprueben a la
+        vez que el servidor no esta activo y lancen, cada uno, su propio
+        proceso ``llama-server`` (doble carga del modelo en GPU) durante los
+        varios segundos que tarda en cargar y abrir el puerto. El tiempo de
+        espera cubre con margen el ``wait`` de arranque del servidor nativo;
+        un bloqueo abandonado (proceso caido) se libera tras 90s de inactividad.
+        """
+        return self._locked(timeout=timeout, mutex_file=self.directory / ".start_lock",
+                           stale_after=90.0)
+
 
     def _read(self) -> dict:
         try:
@@ -320,33 +335,46 @@ def ensure_ollama_server(auto: bool = False) -> bool:
             return True
         if not auto:
             return False
-        if not isinstance(_GLOBAL_SERVER, LlamaCppServer):
-            from igris_os.ai.ollama import _openai_endpoint_from_env
+        registry = _shared_registry()
+        with registry.start_lock():
+            # Re-comprobar con el bloqueo tomado: si otro panel gano la
+            # carrera y ya termino de cargar el modelo mientras esperabamos,
+            # nos sumamos como cliente en vez de lanzar un segundo proceso.
+            if is_openai_running():
+                registry.register()
+                return True
+            if not isinstance(_GLOBAL_SERVER, LlamaCppServer):
+                from igris_os.ai.ollama import _openai_endpoint_from_env
 
-            if _GLOBAL_SERVER is not None:
-                _GLOBAL_SERVER.stop()
-            _GLOBAL_SERVER = LlamaCppServer(
-                Path(native_executable), Path(native_model), _openai_endpoint_from_env(),
-                os.environ.get('IGRIS_NATIVE_MODEL_ALIAS', 'qwen2.5-coder:7b'),
-                int(os.environ.get('IGRIS_NATIVE_IDLE_SECONDS', '180')))
-        started = _GLOBAL_SERVER.start()
-        if started:
-            server_pid = _GLOBAL_SERVER._proc.pid if _GLOBAL_SERVER._proc is not None else None
-            _shared_registry().register(server_pid)
-        return started
+                if _GLOBAL_SERVER is not None:
+                    _GLOBAL_SERVER.stop()
+                _GLOBAL_SERVER = LlamaCppServer(
+                    Path(native_executable), Path(native_model), _openai_endpoint_from_env(),
+                    os.environ.get('IGRIS_NATIVE_MODEL_ALIAS', 'qwen2.5-coder:7b'),
+                    int(os.environ.get('IGRIS_NATIVE_IDLE_SECONDS', '180')))
+            started = _GLOBAL_SERVER.start()
+            if started:
+                server_pid = _GLOBAL_SERVER._proc.pid if _GLOBAL_SERVER._proc is not None else None
+                registry.register(server_pid)
+            return started
     if is_local_llm_running():
         if auto:
             _shared_registry().register()
         return True
     if not auto:
         return False
-    if _GLOBAL_SERVER is None:
-        _GLOBAL_SERVER = OllamaServer()
-    started = _GLOBAL_SERVER.start()
-    if started:
-        server_pid = _GLOBAL_SERVER._proc.pid if _GLOBAL_SERVER._proc is not None else None
-        _shared_registry().register(server_pid)
-    return started
+    registry = _shared_registry()
+    with registry.start_lock():
+        if is_local_llm_running():
+            registry.register()
+            return True
+        if _GLOBAL_SERVER is None:
+            _GLOBAL_SERVER = OllamaServer()
+        started = _GLOBAL_SERVER.start()
+        if started:
+            server_pid = _GLOBAL_SERVER._proc.pid if _GLOBAL_SERVER._proc is not None else None
+            registry.register(server_pid)
+        return started
 
 
 def stop_owned_server() -> None:
