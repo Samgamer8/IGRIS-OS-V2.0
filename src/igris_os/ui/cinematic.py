@@ -973,7 +973,22 @@ def run_cinematic_panel():
                 self.status.setText("● Estado: Esperando aclaración")
                 return
             if action.kind == "cancel":
-                self.finish_message(str(action.payload.get("message") or "Operación cancelada."), True)
+                state_context = {}
+                try:
+                    state_context = self.cognitive_state.context()
+                except Exception:
+                    pass
+                has_pending = bool(state_context.get("active_domain") or state_context.get("pending_domain"))
+                if not has_pending:
+                    # El interprete semantico clasifico el turno como
+                    # cancelacion, pero no hay ninguna tarea activa ni
+                    # pendiente que cancelar: es un falso positivo (p.ej.
+                    # contexto residual). No se bloquea al usuario con un
+                    # "Operacion cancelada" sin sentido; se trata como una
+                    # conversacion normal.
+                    self._submit_conversation(objective)
+                    return
+                self._confirm_pending_cancel(objective, state_context, action)
                 return
             if action.kind == "chat":
                 self._submit_conversation(objective)
@@ -1606,6 +1621,53 @@ def run_cinematic_panel():
                     self.chat.append('[IGRIS] Estado: ' + job.state + '. ' + job.message)
             return False
 
+        def _confirm_pending_cancel(self, objective, state_context, action):
+            """Pregunta al usuario que hacer cuando el interprete semantico
+            detecta una posible cancelacion mientras hay un encargo activo o
+            pendiente de contexto cognitivo (no necesariamente una mision en
+            cola). Nunca cancela ni descarta en silencio."""
+            goal = str(state_context.get("active_goal") or state_context.get("pending_goal") or "").strip()
+            descripcion = (" (" + goal + ")") if goal else ""
+            box = QMessageBox(self)
+            box.setWindowTitle('Tarea pendiente')
+            box.setTextFormat(Qt.TextFormat.PlainText)
+            box.setText(
+                'Señor, tiene una tarea pendiente' + descripcion +
+                '. ¿Quiere que la pause, que la anule, o que la pause y comience una nueva?')
+            cancel_btn = box.addButton('Anular la tarea', QMessageBox.ButtonRole.DestructiveRole)
+            pause_new_btn = box.addButton('Pausarla y empezar nueva', QMessageBox.ButtonRole.ActionRole)
+            pause_btn = box.addButton('Pausarla (seguir después)', QMessageBox.ButtonRole.ActionRole)
+            box.setDefaultButton(pause_btn)
+            box.setEscapeButton(pause_btn)
+            self._deciding_task_switch = True
+            try:
+                box.exec()
+            finally:
+                self._deciding_task_switch = False
+            chosen = box.clickedButton()
+            if chosen is cancel_btn:
+                try:
+                    self.cognitive_state.clear_active()
+                except Exception:
+                    pass
+                self.finish_message(str(action.payload.get("message") or "Tarea pendiente anulada."), True)
+                return
+            if chosen is pause_new_btn:
+                try:
+                    self.cognitive_state.clear_active()
+                except Exception:
+                    pass
+                self.chat.append('[IGRIS] Tarea anterior pausada; se conserva su contexto. Atiendo ahora: ' + objective)
+                self.galaxy.set_busy(False)
+                self.prompt.setPlainText(objective)
+                QTimer.singleShot(0, self.submit)
+                return
+            # Pausarla (seguir despues): no se toca el estado activo/pendiente
+            # ni se procesa el nuevo mensaje; el encargo sigue disponible tal cual.
+            self.finish_message(
+                'Tarea pendiente' + descripcion + ' en pausa, sin cambios. Dime "continúa" cuando quieras retomarla.',
+                True, clear_pending_state=False)
+
         def dispatch_next(self):
             try:
                 if self._deciding_task_switch or self.active_job is not None or self.mission_queue is None:
@@ -1910,8 +1972,8 @@ def run_cinematic_panel():
                 return summary
             return None
 
-        def finish_message(self, text, ok):
-            if ok:
+        def finish_message(self, text, ok, clear_pending_state=True):
+            if ok and clear_pending_state:
                 try:
                     self.cognitive_state.clear_active()
                 except Exception:

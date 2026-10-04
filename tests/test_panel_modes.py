@@ -161,6 +161,66 @@ class PanelModeTests(unittest.TestCase):
                             self.assertIn('ULTIMA ENTREGA CONSERVADA', window.chat.toPlainText())
                             self.assertIn('Ver imagen', window.chat.toPlainText())
                             self.assertEqual(len(window._artifact_catalog), 1)
+
+                            # --- "Operacion cancelada" nunca debe ser silencioso ---
+                            from igris_os.application.mission_router import RoutedAction
+                            cancel_action = RoutedAction('cancel', payload={'message': 'Operación cancelada.'})
+                            cancel_frame = IntentFrame(
+                                domain='conversation', intent='chat', mode='cancel', goal='g')
+
+                            # Caso A: no hay ninguna tarea activa/pendiente (falso positivo
+                            # del interprete semantico) -> no se cancela nada en silencio,
+                            # se trata como conversacion normal.
+                            self.assertEqual(window.cognitive_state.context()['active_domain'], '')
+                            self.assertEqual(window.cognitive_state.context()['pending_domain'], '')
+                            with patch.object(window, '_submit_conversation') as conversation, \
+                                    patch.object(QMessageBox, 'exec') as dialog_exec:
+                                window._handle_cognitive_result('hola, que haces?', cancel_frame, cancel_action)
+                                conversation.assert_called_once_with('hola, que haces?')
+                                dialog_exec.assert_not_called()
+
+                            # Caso B: hay una tarea activa -> debe preguntar, nunca cancelar solo.
+                            window.cognitive_state.record(
+                                'crea un proyecto de ajedrez', IntentFrame(
+                                    domain='programming', intent='create_project', mode='execute',
+                                    goal='crear el ajedrez 3D'))
+                            self.assertEqual(window.cognitive_state.context()['active_domain'], 'programming')
+
+                            def click(label):
+                                def execute(dialog_self):
+                                    button = next(b for b in dialog_self.buttons() if b.text() == label)
+                                    dialog_self._test_choice = button
+                                    return 0
+                                return execute
+
+                            with patch.object(QMessageBox, 'exec', click('Anular la tarea')), \
+                                    patch.object(QMessageBox, 'clickedButton', lambda d: d._test_choice):
+                                window._handle_cognitive_result('olvida eso', cancel_frame, cancel_action)
+                                self.assertIn('Operación cancelada.', window.chat.toPlainText())
+                                self.assertEqual(window.cognitive_state.context()['active_domain'], '')
+
+                            window.chat.clear()
+                            window.cognitive_state.record(
+                                'crea un proyecto de ajedrez', IntentFrame(
+                                    domain='programming', intent='create_project', mode='execute',
+                                    goal='crear el ajedrez 3D'))
+                            with patch.object(QMessageBox, 'exec', click('Pausarla (seguir después)')), \
+                                    patch.object(QMessageBox, 'clickedButton', lambda d: d._test_choice):
+                                window._handle_cognitive_result('cuales son tus funciones', cancel_frame, cancel_action)
+                                self.assertIn('en pausa, sin cambios', window.chat.toPlainText())
+                                # El contexto activo se conserva: no se pierde la tarea.
+                                self.assertEqual(window.cognitive_state.context()['active_domain'], 'programming')
+
+                            window.chat.clear()
+                            with patch.object(QMessageBox, 'exec', click('Pausarla y empezar nueva')), \
+                                    patch.object(QMessageBox, 'clickedButton', lambda d: d._test_choice), \
+                                    patch.object(QTimer, 'singleShot', side_effect=lambda ms, cb: cb()), \
+                                    patch.object(window, 'submit') as resubmit:
+                                window._handle_cognitive_result('cuales son tus funciones', cancel_frame, cancel_action)
+                                self.assertIn('Tarea anterior pausada', window.chat.toPlainText())
+                                self.assertEqual(window.cognitive_state.context()['active_domain'], '')
+                                self.assertEqual(window.prompt.toPlainText(), 'cuales son tus funciones')
+                                resubmit.assert_called_once()
                 except Exception as exc:
                     failures.append(exc)
                 finally:
