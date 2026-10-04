@@ -42,19 +42,28 @@ def synthesize(model, text: str, reference: Path, output: Path) -> None:
         model._igris_reference_signature = signature
     minimum_samples = max(1, int(model.sr * len(text.split()) / 6))
     last_error: Exception | None = None
-    for seed in (42, 43, 44):
+    # El fallo observado (repeticion de token que fuerza un EOS temprano) es
+    # determinista para un texto dado: la misma semilla con los mismos
+    # parametros siempre produce el mismo resultado degenerado. Cambiar solo
+    # la semilla no basta si el patron de repeticion no depende del muestreo;
+    # por eso cada reintento tambien endurece repetition_penalty, que es el
+    # parametro que directamente castiga la repeticion causante del corte.
+    attempts = ((42, 1.2), (43, 1.35), (44, 1.5), (45, 1.65))
+    for seed, repetition_penalty in attempts:
         torch.manual_seed(seed)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(seed)
         try:
             audio = model.generate(
                 text, language_id='es',
-                exaggeration=0.5, cfg_weight=0.5, temperature=0.8, repetition_penalty=1.2)
+                exaggeration=0.5, cfg_weight=0.5, temperature=0.8,
+                repetition_penalty=repetition_penalty)
             samples = audio.detach().cpu().numpy().reshape(-1)
         except (RuntimeError, ValueError) as exc:
             # Una semilla puede degenerar (p.ej. repeticion de token que fuerza
             # un EOS temprano y deja un tensor interno vacio). No se descarta
-            # el intento completo: se prueba la siguiente semilla.
+            # el intento completo: se prueba la siguiente semilla con mas
+            # penalizacion de repeticion.
             last_error = exc
             continue
         if samples.size >= minimum_samples:

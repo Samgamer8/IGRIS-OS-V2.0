@@ -2049,6 +2049,14 @@ def run_cinematic_panel():
                 from igris_os.cognitive import CognitiveStateStore, SemanticInterpreter
                 self.cognitive_state = CognitiveStateStore(
                     self.runtime / "cognitive" / "state.json")
+                # El contexto activo/pendiente es memoria conversacional de corto
+                # plazo (resolver "eso", "continua") para una sesion en vivo; no
+                # representa una tarea real reanudable (eso lo gestiona
+                # MissionQueue con su propio dialogo _confirm_task_switch). Si se
+                # arrastra de un proceso anterior, provoca falsos "tarea
+                # pendiente" al reabrir el panel, asi que se descarta al
+                # arrancar.
+                self.cognitive_state.clear_active()
                 self.cognitive = SemanticInterpreter(process_client, self.cognitive_state)
                 self.kernel = build_igris(self.runtime)
                 self.galaxy.set_capabilities(self.kernel.registry.specs())

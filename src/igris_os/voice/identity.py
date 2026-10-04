@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 import json
+import os
 from pathlib import Path
 import queue
 import subprocess
@@ -17,7 +18,8 @@ class IdentityVoice(WindowsVoice):
     def __init__(self, reference: Path, runtime: Path, python: Path | None = None):
         self.reference = Path(reference).resolve()
         self.runtime = Path(runtime).resolve()
-        self.python = python or self.reference.parent.parent / '.venv-voice/Scripts/python.exe'
+        self.python = python or Path(os.environ.get('IGRIS_VOICE_PYTHON') or
+                         self.reference.parent.parent / '.venv-voice/Scripts/python.exe')
         self.events = queue.Queue()
         self._responses = queue.Queue()
         self._closed = threading.Event()
@@ -77,14 +79,25 @@ class IdentityVoice(WindowsVoice):
             output = directory / 'speech_0.wav'
             pending = executor.submit(self._synthesize, segments[0], output)
             for index in range(len(segments)):
-                pending.result()
+                current = output
+                try:
+                    pending.result()
+                    succeeded = True
+                except Exception as exc:
+                    # Una frase que falla no debe silenciar el resto de la
+                    # respuesta: se registra y se continua con el siguiente
+                    # fragmento en vez de abortar toda la reproduccion.
+                    succeeded = False
+                    self.events.put(
+                        'No se pudo generar un fragmento de voz: ' + str(exc)
+                        + '. Diagnostico: ' + str(self.runtime / 'voice_identity.log'))
                 if self._closed.is_set():
                     return
-                current = output
                 if index + 1 < len(segments):
                     output = directory / f'speech_{index + 1}.wav'
                     pending = executor.submit(self._synthesize, segments[index + 1], output)
-                play(current)
+                if succeeded:
+                    play(current)
 
     def _speech_worker(self) -> None:
         while not self._closed.is_set():
