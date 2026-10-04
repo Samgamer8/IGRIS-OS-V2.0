@@ -39,13 +39,16 @@ class LocalServerTests(unittest.TestCase):
 
     def test_compatible_server_prevents_ollama_autostart(self):
         owned = Mock()
-        with patch.object(server, 'is_ollama_running', return_value=False), \
-             patch.object(server, 'is_lmstudio_running', return_value=False), \
-             patch.object(server, 'is_openai_running', return_value=True), \
-             patch.object(server, '_GLOBAL_SERVER', owned):
-            self.assertTrue(server.ensure_ollama_server(auto=True))
-            self.assertEqual(server.detect_backend(), 'openai')
-        owned.start.assert_not_called()
+        with TemporaryDirectory() as directory:
+            registry = server.SharedServerRegistry(Path(directory) / '.igris_shared_server')
+            with patch.object(server, 'is_ollama_running', return_value=False), \
+                 patch.object(server, 'is_lmstudio_running', return_value=False), \
+                 patch.object(server, 'is_openai_running', return_value=True), \
+                 patch.object(server, '_GLOBAL_SERVER', owned), \
+                 patch.object(server, '_shared_registry', return_value=registry):
+                self.assertTrue(server.ensure_ollama_server(auto=True))
+                self.assertEqual(server.detect_backend(), 'openai')
+            owned.start.assert_not_called()
 
     def test_status_reports_compatible_endpoint_without_ollama(self):
         with patch.object(server, 'is_ollama_running', return_value=False), \
@@ -63,6 +66,53 @@ class LocalServerTests(unittest.TestCase):
              patch.object(server, 'OllamaServer') as factory:
             self.assertFalse(server.ensure_ollama_server(auto=False))
         factory.assert_not_called()
+
+
+class SharedServerRegistryTests(unittest.TestCase):
+    """IGRIS OS e IGRIS OS ibrido pueden compartir el mismo servidor LLM en
+    loopback. Estas pruebas cubren el conteo de referencias entre procesos
+    que evita apagarlo mientras otro panel lo siga usando."""
+
+    def test_second_client_prevents_shutdown_until_both_release(self):
+        with TemporaryDirectory() as directory:
+            registry = server.SharedServerRegistry(Path(directory) / '.igris_shared_server')
+            with patch.object(server, '_pid_alive', return_value=True):
+                with patch('os.getpid', return_value=111):
+                    registry.register(server_pid=999)
+                with patch('os.getpid', return_value=222):
+                    registry.register()
+                with patch('os.getpid', return_value=111):
+                    self.assertIsNone(registry.release())
+                with patch('os.getpid', return_value=222):
+                    self.assertEqual(registry.release(), 999)
+
+    def test_dead_clients_are_pruned_on_access(self):
+        with TemporaryDirectory() as directory:
+            registry = server.SharedServerRegistry(Path(directory) / '.igris_shared_server')
+            # El PID 111 queda registrado pero luego "muere" (crash/kill -9);
+            # solo el 222, que sigue vivo, cuenta como cliente real.
+            with patch.object(server, '_pid_alive', side_effect=lambda pid: pid != 111):
+                with patch('os.getpid', return_value=111):
+                    registry.register(server_pid=999)
+                with patch('os.getpid', return_value=222):
+                    registry.register()
+                    self.assertEqual(registry.release(), 999)
+
+    def test_stop_owned_server_skips_shutdown_while_other_panel_active(self):
+        with TemporaryDirectory() as directory:
+            registry = server.SharedServerRegistry(Path(directory) / '.igris_shared_server')
+            owned = Mock()
+            with patch.object(server, '_shared_registry', return_value=registry), \
+                 patch.object(server, '_pid_alive', return_value=True):
+                registry.register(server_pid=4321)  # nuestro propio panel
+                with patch('os.getpid', return_value=99999):
+                    registry.register()  # IGRIS OS ibrido se suma como cliente
+                with patch.object(server, '_GLOBAL_SERVER', owned):
+                    server.stop_owned_server()
+                owned.stop.assert_not_called()
+                # El otro panel tambien cierra: ahora si debe apagarse.
+                with patch('os.getpid', return_value=99999):
+                    self.assertEqual(registry.release(), 4321)
 
 
 if __name__ == '__main__':

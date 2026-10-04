@@ -6,6 +6,8 @@ comprueba y apaga en loopback. Tambien soporta LM Studio via API OpenAI.
 """
 from __future__ import annotations
 
+import contextlib
+import ctypes
 import os
 import json
 import shutil
@@ -21,6 +23,114 @@ DEFAULT_ENDPOINT = "http://127.0.0.1:11434"
 LMSTUDIO_ENDPOINT = "http://127.0.0.1:1234"
 
 _GLOBAL_SERVER: OllamaServer | None = None
+
+
+def _pid_alive(pid: int) -> bool:
+    """True si el proceso con ese PID sigue vivo (Windows)."""
+    if pid <= 0:
+        return False
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return False
+    ctypes.windll.kernel32.CloseHandle(handle)
+    return True
+
+
+def _kill_pid(pid: int) -> None:
+    subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                    capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
+
+class SharedServerRegistry:
+    """Cuenta de referencias entre procesos para un servidor LLM compartido.
+
+    IGRIS OS e IGRIS OS ibrido son procesos Python independientes que pueden
+    apuntar al mismo `native_executable`/`native_model_path` (mismo endpoint
+    loopback) para no cargar el modelo dos veces en la GPU. Sin esto, cerrar
+    el panel que arranco el servidor lo apagaba aunque el otro panel lo
+    siguiera usando. El registro vive en disco, junto al ejecutable
+    compartido, e identifica clientes vivos por PID.
+    """
+
+    def __init__(self, directory: Path):
+        self.directory = directory
+        self.state_file = directory / "clients.json"
+        self.mutex_file = directory / ".mutex"
+
+    @contextlib.contextmanager
+    def _locked(self, timeout: float = 5.0):
+        self.directory.mkdir(parents=True, exist_ok=True)
+        deadline = time.monotonic() + timeout
+        fd = None
+        while fd is None:
+            try:
+                fd = os.open(str(self.mutex_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                if time.monotonic() > deadline:
+                    try:
+                        if time.time() - self.mutex_file.stat().st_mtime > 10:
+                            self.mutex_file.unlink(missing_ok=True)
+                            continue
+                    except FileNotFoundError:
+                        continue
+                    raise TimeoutError("No se pudo adquirir el bloqueo del servidor compartido")
+                time.sleep(0.05)
+        try:
+            yield
+        finally:
+            os.close(fd)
+            self.mutex_file.unlink(missing_ok=True)
+
+    def _read(self) -> dict:
+        try:
+            return json.loads(self.state_file.read_text(encoding="utf-8"))
+        except (FileNotFoundError, ValueError):
+            return {}
+
+    def _write(self, data: dict) -> None:
+        self.state_file.write_text(json.dumps(data), encoding="utf-8")
+
+    def _prune(self, data: dict) -> dict:
+        clients = {pid: info for pid, info in data.get("clients", {}).items()
+                  if _pid_alive(int(pid))}
+        return {"server_pid": data.get("server_pid"), "clients": clients}
+
+    def register(self, server_pid: int | None = None) -> None:
+        """Marca este PID como cliente activo; opcionalmente registra quien arranco el servidor."""
+        with self._locked():
+            data = self._prune(self._read())
+            data["clients"][str(os.getpid())] = {"started": time.time()}
+            if server_pid is not None:
+                data["server_pid"] = server_pid
+            self._write(data)
+
+    def release(self) -> int | None:
+        """Quita este PID. Si no quedan clientes vivos, devuelve el PID del
+        servidor a apagar (o None si no hay ninguno registrado)."""
+        if not self.state_file.exists():
+            # Nada que liberar: evita crear el directorio de registro cuando
+            # este proceso nunca llego a registrarse (p. ej. el servidor
+            # nunca arranco).
+            return None
+        with self._locked():
+            data = self._prune(self._read())
+            data["clients"].pop(str(os.getpid()), None)
+            if data["clients"]:
+                self._write(data)
+                return None
+            server_pid = data.get("server_pid")
+            try:
+                self.state_file.unlink(missing_ok=True)
+            except OSError:
+                pass
+            return server_pid
+
+
+def _shared_registry() -> SharedServerRegistry:
+    anchor = os.environ.get("IGRIS_NATIVE_EXECUTABLE", "").strip()
+    base = Path(anchor).resolve().parent if anchor else _PROJECT_ROOT / "runtime"
+    return SharedServerRegistry(base / ".igris_shared_server")
 
 
 def bundled_ollama() -> Path | None:
@@ -204,6 +314,9 @@ def ensure_ollama_server(auto: bool = False) -> bool:
     native_model = os.environ.get('IGRIS_NATIVE_MODEL_PATH', '').strip()
     if os.environ.get('IGRIS_PREFERRED_BACKEND') == 'openai' and native_executable and native_model:
         if is_openai_running():
+            if auto:
+                # Otro proceso (este u otro panel IGRIS) ya lo dejo activo.
+                _shared_registry().register()
             return True
         if not auto:
             return False
@@ -216,21 +329,40 @@ def ensure_ollama_server(auto: bool = False) -> bool:
                 Path(native_executable), Path(native_model), _openai_endpoint_from_env(),
                 os.environ.get('IGRIS_NATIVE_MODEL_ALIAS', 'qwen2.5-coder:7b'),
                 int(os.environ.get('IGRIS_NATIVE_IDLE_SECONDS', '180')))
-        return _GLOBAL_SERVER.start()
+        started = _GLOBAL_SERVER.start()
+        if started:
+            server_pid = _GLOBAL_SERVER._proc.pid if _GLOBAL_SERVER._proc is not None else None
+            _shared_registry().register(server_pid)
+        return started
     if is_local_llm_running():
+        if auto:
+            _shared_registry().register()
         return True
     if not auto:
         return False
     if _GLOBAL_SERVER is None:
         _GLOBAL_SERVER = OllamaServer()
-    return _GLOBAL_SERVER.start()
+    started = _GLOBAL_SERVER.start()
+    if started:
+        server_pid = _GLOBAL_SERVER._proc.pid if _GLOBAL_SERVER._proc is not None else None
+        _shared_registry().register(server_pid)
+    return started
 
 
 def stop_owned_server() -> None:
+    """Libera este proceso como cliente del servidor compartido.
+
+    Solo apaga el servidor LLM si no queda ningun otro panel IGRIS (este
+    proyecto o IGRIS OS ibrido) registrado como cliente activo.
+    """
     global _GLOBAL_SERVER
-    if _GLOBAL_SERVER is not None:
-        _GLOBAL_SERVER.stop()
-        _GLOBAL_SERVER = None
+    server_pid = _shared_registry().release()
+    if server_pid is not None:
+        if _GLOBAL_SERVER is not None:
+            _GLOBAL_SERVER.stop()
+        elif _pid_alive(server_pid):
+            _kill_pid(server_pid)
+    _GLOBAL_SERVER = None
 
 
 def server_status() -> dict:
