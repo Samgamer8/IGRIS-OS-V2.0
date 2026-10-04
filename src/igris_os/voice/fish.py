@@ -7,7 +7,10 @@ import tempfile
 import urllib.error
 import urllib.request
 import uuid
-import winsound
+try:
+    import winsound
+except ImportError:
+    winsound = None
 from pathlib import Path
 from typing import Any
 
@@ -48,7 +51,7 @@ class FishAudioVoice:
         clean = self._clean_text(text)
         if not clean:
             return False
-        if not self.api_key:
+        if not self.api_key or winsound is None:
             return self._fallback.speak(clean, voice_name)
 
         payload: dict[str, Any] = {
@@ -100,6 +103,11 @@ class FishAudioVoice:
             return True
         except Exception:
             return self._fallback.speak(clean, voice_name)
+        finally:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     @staticmethod
     def _decode_audio_payload(raw: bytes, content_type: str | None) -> bytes:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -30,6 +31,7 @@ class MultiFileDevelopmentResult:
     files: tuple[str, ...] = ()
     diagnostics: tuple[str, ...] = ()
     models_tried: tuple[str, ...] = ()
+    attempts: int = 0
 
 
 class PythonMultiFileDeveloper:
@@ -51,6 +53,8 @@ class PythonMultiFileDeveloper:
                 ) -> MultiFileDevelopmentResult:
         if not confirmed:
             return MultiFileDevelopmentResult(False, "Se necesita confirmacion")
+        if not objective.strip():
+            return MultiFileDevelopmentResult(False, "Falta el objetivo")
         diagnostics = ""
         plan = PythonComponentPlanner().plan(objective) if componentized else None
         previous_package: dict | None = None
@@ -66,6 +70,9 @@ class PythonMultiFileDeveloper:
                 objective, diagnostics, plan, previous_package, active_model)
             if not reply.ok:
                 diagnostics = reply.error or "Modelo sin respuesta"
+                if model_index + 1 < len(model_sequence):
+                    model_index += 1
+                    active_model = model_sequence[model_index]
                 continue
             try:
                 package = StrictJSONParser.extract(reply.text)
@@ -76,6 +83,16 @@ class PythonMultiFileDeveloper:
                     root, ("python", "-m", "pytest", "-q"),
                     confirmed=True, timeout=60)
                 if checked.run and checked.run.returncode == 0 and not checked.run.timed_out:
+                    runtime_diagnostic = self._runtime_acceptance_diagnostic(
+                        root, objective)
+                    if runtime_diagnostic:
+                        diagnostics = runtime_diagnostic
+                        if (runtime_diagnostic == last_domain_diagnostic and
+                                model_index + 1 < len(model_sequence)):
+                            model_index += 1
+                            active_model = model_sequence[model_index]
+                        last_domain_diagnostic = runtime_diagnostic
+                        continue
                     domain_diagnostic = (
                         domain_validator(root) if domain_validator else ""
                     )
@@ -90,18 +107,79 @@ class PythonMultiFileDeveloper:
                     (root / "VERIFICATION.json").write_text(json.dumps({
                         "tests_passed": True, "model": active_model,
                         "models_tried": models_tried,
+                        "runtime_acceptance_passed": True,
                         "files": files,
                     }, ensure_ascii=False, indent=2), encoding="utf-8")
                     return MultiFileDevelopmentResult(
                         True, "Proyecto multiarchivo verificado", root, tuple(files),
-                        models_tried=tuple(models_tried))
+                        models_tried=tuple(models_tried), attempts=attempt)
                 diagnostics = ((checked.run.stdout + checked.run.stderr)[-4000:]
                                if checked.run else checked.reason)
             except (ValueError, TypeError, KeyError, OSError, SyntaxError) as exc:
                 diagnostics = str(exc)
         return MultiFileDevelopmentResult(
             False, "Proyecto multiarchivo no verificado", diagnostics=(diagnostics,),
-            models_tried=tuple(models_tried))
+            models_tried=tuple(models_tried), attempts=attempt)
+
+    @staticmethod
+    def _runtime_acceptance_diagnostic(root: Path, objective: str) -> str:
+        """Comprueba contratos de ejecución que pytest puede omitir."""
+        normalized = objective.casefold()
+        console_requested = any(term in normalized for term in (
+            "interfaz de consola", "consola", "command-line", "command line",
+            "terminal", "aplicación cli", "aplicacion cli",
+        ))
+        if not console_requested:
+            return ""
+
+        entry_functions: set[str] = set()
+        guarded_entries: set[str] = set()
+        for path in root.rglob("*.py"):
+            relative = path.relative_to(root)
+            if (relative.name.startswith("test_") or
+                    "tests" in {part.casefold() for part in relative.parts}):
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"),
+                             filename=relative.as_posix())
+            defined = {
+                node.name for node in tree.body
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+            entry_functions.update(
+                name for name in defined
+                if name.casefold() in {"main", "run", "run_cli", "cli"})
+            for node in tree.body:
+                if not isinstance(node, ast.If) or not _is_main_guard(node.test):
+                    continue
+                called = {
+                    call.func.id for call in ast.walk(node)
+                    if isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+                }
+                guarded_entries.update(called & defined)
+
+        if not entry_functions:
+            return (
+                "ACEPTACION_RUNTIME: se pidió una interfaz de consola, pero no "
+                "existe una función de entrada main/run_cli ejecutable.")
+        if not guarded_entries:
+            return (
+                "ACEPTACION_RUNTIME: la interfaz de consola no arranca con "
+                "`python -m modulo`; añade `if __name__ == \"__main__\": main()`.")
+
+        tests = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in root.rglob("test_*.py")
+        )
+        exercised = any(
+            re.search(rf"\b{re.escape(name)}\s*\(", tests)
+            for name in guarded_entries
+        )
+        if not exercised:
+            return (
+                "ACEPTACION_RUNTIME: pytest no ejecuta la entrada de consola. "
+                "Añade una prueba que simule input, invoque main/run_cli y compruebe "
+                "el flujo principal y la salida.")
+        return ""
 
     def _complete_missing_components(self, package: dict,
                                      plan: ComponentPlan | None,
@@ -119,7 +197,8 @@ class PythonMultiFileDeveloper:
             "multiarchivo ya existente: " + ", ".join(missing) + ". "
             "Mantén importaciones coherentes con model.py, service.py y main.py. "
             "El test debe usar pytest y verificar el flujo principal.\n"
-            "Archivos existentes: " + ", ".join(sorted(supplied)))
+            "Contenido de los archivos existentes: " +
+            json.dumps(package["files"], ensure_ascii=False)[:18000])
         schema = {
             "type": "object",
             "properties": {"files": {"type": "object",
@@ -152,6 +231,15 @@ class PythonMultiFileDeveloper:
             "pongas markdown fuera del JSON. Si una prueba tiene una expectativa "
             "incorrecta, corrige la prueba y no rompas una implementacion correcta.\n"
             "OBJETIVO:\n" + objective)
+        if any(term in objective.casefold() for term in (
+                "interfaz de consola", "consola", "command-line", "command line",
+                "terminal", "aplicación cli", "aplicacion cli")):
+            prompt += (
+                "\nCONTRATO DE CONSOLA OBLIGATORIO: el módulo ejecutable debe llamar "
+                "a main/run_cli bajo `if __name__ == \"__main__\"`; el comando "
+                "documentado `python -m modulo` debe iniciar la interfaz. Incluye una "
+                "prueba pytest que simule input, invoque esa entrada y compruebe al "
+                "menos un flujo funcional y su salida.")
         if plan is not None:
             components = "\n".join(
                 f"{item.path}: {item.purpose}"
@@ -235,5 +323,21 @@ class PythonMultiFileDeveloper:
             has_test = has_test or relative.name.startswith("test_")
         if not has_test:
             raise ValueError("Falta test_*.py en el paquete multiarchivo")
-        (root / "README.md").write_text(str(package.get("readme", "")), encoding="utf-8")
+        readme = str(package.get("readme", ""))
+        if readme or not (root / "README.md").exists():
+            (root / "README.md").write_text(readme, encoding="utf-8")
         return root, written
+
+
+def _is_main_guard(test: ast.expr) -> bool:
+    if not isinstance(test, ast.Compare) or len(test.ops) != 1:
+        return False
+    if not isinstance(test.ops[0], ast.Eq) or len(test.comparators) != 1:
+        return False
+    left, right = test.left, test.comparators[0]
+    pairs = ((left, right), (right, left))
+    return any(
+        isinstance(name, ast.Name) and name.id == "__name__" and
+        isinstance(value, ast.Constant) and value.value == "__main__"
+        for name, value in pairs
+    )

@@ -1,13 +1,19 @@
+"""Calificacion acotada con pruebas externas y evidencia conservada."""
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 import json
 import tempfile
 import time
 from typing import Callable
+from uuid import uuid4
 
+from igris_os.ai import OllamaClient
 from igris_os.programming import PythonMultiFileDeveloper, PythonProjectDeveloper
+from igris_os.programming.mission_workspace import project_files, save_json
+from .acceptance_cases import CONTRACTS
+from .external_acceptance import verify_candidate, retained_verification_is_valid
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +29,7 @@ class QualificationResult:
     message: str
     project_files: tuple[str, ...]
     duration_seconds: float
+    verification: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,161 +40,117 @@ class ModelQualification:
 
 
 class ProgrammingModelQualifier:
-    """Aprueba un modelo solo si entrega proyectos reales con evidencia local."""
-
-    CASES = (
-        QualificationCase(
-            "todo_memory",
-            "Crea una aplicación Python de consola para gestionar tareas en memoria. "
-            "Debe crear, listar y completar tareas. Incluye pruebas unitarias."),
-        QualificationCase(
-            "text_statistics",
-            "Crea una aplicación Python que calcule palabras, líneas y caracteres de un texto. "
-            "Incluye una API de funciones y pruebas unitarias."),
-    )
+    """Aprueba exclusivamente los casos ejecutados; no certifica nivel senior."""
+    KIND = 'python_single_file'
+    CASE_NAMES = ('todo_memory', 'text_statistics')
+    CASES = tuple(QualificationCase(n, CONTRACTS[n]) for n in CASE_NAMES)
+    DEVELOPER = PythonProjectDeveloper
 
     def __init__(self, client, model: str,
                  developer_factory: Callable = PythonProjectDeveloper) -> None:
-        self.client = client
-        self.model = model
+        self.client, self.model = client, model
         self.developer_factory = developer_factory
+        self.evidence_root = None
+        self.live = type(client) is OllamaClient and developer_factory is self.DEVELOPER
 
     def run(self, *, attempts: int = 1) -> ModelQualification:
-        results = tuple(self._run_case(case, attempts) for case in self.CASES)
-        return ModelQualification(self.model, bool(results) and all(
-            result.passed for result in results), results)
+        if self.evidence_root is None:
+            self.evidence_root = Path(tempfile.mkdtemp(prefix='igris-qualification-'))
+        run_root = self.evidence_root / uuid4().hex
+        results = tuple(self._run_case(case, attempts, run_root / case.name) for case in self.CASES)
+        return ModelQualification(self.model, self.live and bool(results) and all(r.passed for r in results), results)
 
     def write_report(self, path: Path, *, attempts: int = 1) -> ModelQualification:
-        qualification = self.run(attempts=attempts)
-        target = path.resolve()
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(json.dumps({
-            "model": qualification.model,
-            "approved": qualification.approved,
-            "results": [asdict(item) for item in qualification.results],
-        }, ensure_ascii=False, indent=2), encoding="utf-8")
-        return qualification
+        target = Path(path).resolve()
+        self.evidence_root = target.parent / (target.stem + '_evidence')
+        result = self.run(attempts=attempts)
+        save_json(target, {
+            'schema': 2, 'kind': self.KIND, 'scope': 'Solo los casos funcionales enumerados',
+            'execution_mode': 'live_local_backend' if self.live else 'test_fixture',
+            'model': result.model, 'approved': result.approved,
+            'functional_cases_passed': bool(result.results) and all(r.passed for r in result.results),
+            'results': [asdict(r) for r in result.results],
+        })
+        return result
 
-    def _run_case(self, case: QualificationCase,
-                  attempts: int) -> QualificationResult:
-        started = time.monotonic()
-        with tempfile.TemporaryDirectory(prefix="igris-model-qualification-") as raw:
-            developer = self.developer_factory(self.client, Path(raw), self.model)
-            result = developer.develop(
-                case.objective, confirmed=True, attempts=max(1, attempts))
-            files: tuple[str, ...] = ()
-            verified = False
-            if result.project:
-                project = Path(result.project)
-                files = tuple(sorted(
-                    path.relative_to(project).as_posix()
-                    for path in project.rglob("*") if path.is_file()
-                    and not any(part in {".pytest_cache", "__pycache__"}
-                                for part in path.relative_to(project).parts)))
-                verified = (project / "VERIFICATION.json").is_file()
+    def _run_case(self, case, attempts, workspace):
+        started, names, evidence = time.monotonic(), (), {}
+        try:
+            developer = self.developer_factory(self.client, workspace / 'generation', self.model)
+            kwargs = {'confirmed': True, 'attempts': min(5, max(1, attempts))}
+            if self.KIND == 'python_multifile_application':
+                kwargs['componentized'] = True
+            result = developer.develop(case.objective, **kwargs)
             message = result.message
-            if not result.ok and getattr(result, "diagnostics", ()):
-                message += ": " + "; ".join(result.diagnostics)[:1000]
-            return QualificationResult(
-                case.name, bool(result.ok and verified), message, files,
-                round(time.monotonic() - started, 3))
+            if result.project:
+                project = Path(result.project).resolve()
+                if not project.is_relative_to(workspace.resolve()):
+                    raise ValueError('El generador devolvio una carpeta fuera del examen')
+                names = tuple(sorted(project_files(project)))
+                evidence = verify_candidate(project, case.name, workspace / 'assessment')
+            passed = result.ok and evidence.get('ok') is True
+            if not passed:
+                message += '; no supera la comprobacion funcional externa'
+                if evidence.get('error'):
+                    message += ': ' + evidence['error']
+            return QualificationResult(case.name, bool(passed), message, names,
+                                       round(time.monotonic() - started, 3), evidence)
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            return QualificationResult(case.name, False, str(exc), names,
+                                       round(time.monotonic() - started, 3), evidence)
 
 
 class MultiFileApplicationQualifier(ProgrammingModelQualifier):
-    """Califica modelos exclusivamente para aplicaciones Python por componentes."""
+    KIND = 'python_multifile_application'
+    CASE_NAMES = ('inventory_components', 'notes_components', 'statistics_components')
+    CASES = tuple(QualificationCase(n, CONTRACTS[n]) for n in CASE_NAMES)
+    DEVELOPER = PythonMultiFileDeveloper
 
-    CASES = (
-        QualificationCase(
-            "inventory_components",
-            "Crea una aplicación Python multiarchivo de inventario local. Separa servicio y entrada. "
-            "Debe agregar artículos, listarlos y actualizar cantidades. Incluye pruebas pytest."),
-        QualificationCase(
-            "notes_components",
-            "Crea una aplicación Python multiarchivo de notas en memoria. Separa modelo y servicio. "
-            "Debe crear notas, buscarlas por texto y eliminarlas. Incluye pruebas pytest."),
-        QualificationCase(
-            "statistics_components",
-            "Crea una aplicación Python multiarchivo de estadísticas de texto. Separa funciones y CLI. "
-            "Debe contar líneas, palabras y caracteres. Incluye pruebas pytest."),
-    )
-
-    def __init__(self, client, model: str,
-                 developer_factory: Callable = PythonMultiFileDeveloper) -> None:
+    def __init__(self, client, model: str, developer_factory: Callable = PythonMultiFileDeveloper) -> None:
         super().__init__(client, model, developer_factory)
 
-    def _run_case(self, case: QualificationCase,
-                  attempts: int) -> QualificationResult:
-        started = time.monotonic()
-        with tempfile.TemporaryDirectory(prefix="igris-multifile-qualification-") as raw:
-            developer = self.developer_factory(self.client, Path(raw), self.model)
-            result = developer.develop(
-                case.objective, confirmed=True, attempts=max(1, attempts),
-                componentized=True)
-            files: tuple[str, ...] = ()
-            verified = False
-            if result.project:
-                project = Path(result.project)
-                files = tuple(sorted(
-                    path.relative_to(project).as_posix()
-                    for path in project.rglob("*") if path.is_file()
-                    and not any(part in {".pytest_cache", "__pycache__"}
-                                for part in path.relative_to(project).parts)))
-                verified = (project / "VERIFICATION.json").is_file()
-            message = result.message
-            if not result.ok and getattr(result, "diagnostics", ()):
-                message += ": " + "; ".join(result.diagnostics)[:1000]
-            return QualificationResult(
-                case.name, bool(result.ok and verified), message, files,
-                round(time.monotonic() - started, 3))
 
-    def write_report(self, path: Path, *, attempts: int = 1) -> ModelQualification:
-        qualification = self.run(attempts=attempts)
-        target = path.resolve()
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(json.dumps({
-            "kind": "python_multifile_application",
-            "model": qualification.model,
-            "approved": qualification.approved,
-            "results": [asdict(item) for item in qualification.results],
-        }, ensure_ascii=False, indent=2), encoding="utf-8")
-        return qualification
+def _valid_report(report):
+    if (not isinstance(report, dict) or report.get('schema') != 2
+            or report.get('approved') is not True or report.get('execution_mode') != 'live_local_backend'
+            or not isinstance(report.get('model'), str) or not report['model']):
+        return False
+    names = {ProgrammingModelQualifier.KIND: ProgrammingModelQualifier.CASE_NAMES,
+             MultiFileApplicationQualifier.KIND: MultiFileApplicationQualifier.CASE_NAMES}.get(report.get('kind'))
+    rows = report.get('results')
+    if not names or not isinstance(rows, list) or len(rows) != len(names):
+        return False
+    if {r.get('name') for r in rows if isinstance(r, dict)} != set(names):
+        return False
+    for row in rows:
+        if not isinstance(row, dict) or row.get('passed') is not True:
+            return False
+        evidence = row.get('verification')
+        if (not isinstance(evidence, dict) or evidence.get('case') != row.get('name')
+                or not retained_verification_is_valid(evidence)):
+            return False
+    return True
+
+
+def _approved_reports(audit_root):
+    root = Path(audit_root).resolve()
+    if root.is_dir():
+        for path in root.glob('model_qualification_*.json'):
+            try:
+                report = json.loads(path.read_text(encoding='utf-8'))
+                if _valid_report(report):
+                    yield report
+            except (OSError, ValueError, TypeError):
+                continue
 
 
 def is_model_approved(audit_root: Path, model: str) -> bool:
-    """Lee evidencia persistente; un modelo sin informe aprobado queda bloqueado."""
     return model in approved_models(audit_root)
 
 
 def approved_models(audit_root: Path) -> tuple[str, ...]:
-    """Modelos que superaron todas las misiones de calificación persistidas."""
-    root = audit_root.resolve()
-    if not root.is_dir():
-        return ()
-    models = set()
-    for path in root.glob("model_qualification_*.json"):
-        try:
-            report = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        model = report.get("model")
-        if isinstance(model, str) and model and report.get("approved") is True:
-            models.add(model)
-    return tuple(sorted(models))
+    return tuple(sorted({r['model'] for r in _approved_reports(audit_root)}))
 
 
 def approved_models_for(audit_root: Path, kind: str) -> tuple[str, ...]:
-    """Devuelve modelos aprobados para una especialidad de ejecución concreta."""
-    root = audit_root.resolve()
-    if not root.is_dir():
-        return ()
-    models = set()
-    for path in root.glob("model_qualification_*.json"):
-        try:
-            report = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        model = report.get("model")
-        report_kind = str(report.get("kind", "python_single_file"))
-        if report_kind == kind and isinstance(model, str) and report.get("approved") is True:
-            models.add(model)
-    return tuple(sorted(models))
+    return tuple(sorted({r['model'] for r in _approved_reports(audit_root) if r['kind'] == kind}))

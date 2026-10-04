@@ -9,11 +9,10 @@ from igris_os.domain import ActionRisk, CapabilitySpec, ExecutionResult
 from igris_os.programming import MultiLanguageVerifier
 
 
-EXPERIMENTAL_CAPABILITIES = frozenset({
-    "programming.autonomous.develop",
-    "programming.multilang.develop",
-    "programming.delegate",
-})
+# IGRIS OS V5: autonomous programming is a production capability.
+# Runtime safety remains governed by capability risk, permissions,
+# confirmations, workspace containment and verification gates.
+PRODUCTION_BLOCKED_CAPABILITIES = frozenset()
 
 
 def _production_languages(_payload):
@@ -42,24 +41,31 @@ def _production_languages(_payload):
 
 
 def build_production_igris(runtime: Path | None = None) -> IgrisKernel:
-    """Construye el kernel RC ocultando rutas experimentales no certificadas."""
+    """Construye el kernel de producción conservando autonomía verificada."""
 
     kernel = build_igris(runtime)
-    disabled = set(EXPERIMENTAL_CAPABILITIES)
+    disabled = set(PRODUCTION_BLOCKED_CAPABILITIES)
+
     if shutil.which("godot") is None:
         disabled.update({"games.godot.playtest", "games.godot.export"})
+
     if shutil.which("git") is None:
-        disabled.update(name for name in kernel.registry._items
-                        if name.startswith("git."))
+        disabled.update(
+            name for name in kernel.registry._items
+            if name.startswith("git.")
+        )
+
     if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
         disabled.update({
-            "multimedia.extract_audio", "multimedia.thumbnail",
-            "multimedia.transcode", "multimedia.pipeline",
+            "multimedia.extract_audio",
+            "multimedia.thumbnail",
+            "multimedia.transcode",
+            "multimedia.pipeline",
         })
-    if shutil.which("k3") is None:
-        disabled.update({"k3.gate", "k3.run"})
+
     for name in disabled:
         kernel.registry._items.pop(name, None)
+
     kernel.registry._items.pop("programming.languages", None)
     kernel.registry.register(
         CapabilitySpec(
@@ -69,4 +75,5 @@ def build_production_igris(runtime: Path | None = None) -> IgrisKernel:
         ),
         _production_languages,
     )
+
     return kernel

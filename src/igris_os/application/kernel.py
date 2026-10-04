@@ -104,6 +104,19 @@ class IgrisKernel:
 
         spec, handler = item
 
+        # PASO 1b: contratos cerrados para capacidades protegidas. El LLM no
+        # puede inyectar campos/comandos arbitrarios en Windows ni deformar los
+        # limites del ProgrammingTeam. Capacidades historicas no protegidas
+        # mantienen compatibilidad.
+        try:
+            from igris_os.cognitive.contracts import validate_capability_payload
+            normalized_payload = validate_capability_payload(capability, payload)
+        except Exception as exc:
+            result = ExecutionResult.failure(str(exc), "CONTRACT_INVALID")
+            self.audit.record_denial(mission.id, capability, result.message,
+                                     code=result.code, user_id=user_id)
+            return result
+
         # PASO 2: Evaluar policy con aprobacion verificada
         approved = self.approval.consume(approval, mission.objective, capability)
         decision = self.policy.evaluate(spec, confirmed=approved)
@@ -125,7 +138,7 @@ class IgrisKernel:
             return result
 
         # PASO 4: Ejecutar con timeout (subproceso cuando es viable, hilo si no)
-        request = dict(payload or {})
+        request = dict(normalized_payload)
         request["mission_id"] = mission.id
         request["workspace"] = str(workspace)
         if on_progress:
@@ -140,17 +153,19 @@ class IgrisKernel:
         except TimeoutException:
             result = ExecutionResult.timeout(spec.timeout_seconds)
         except Exception as e:
+            detail = (type(e).__name__ + ': ' + str(e)).strip(': ')
             result = ExecutionResult.failure(
-                "Capacidad fallo de forma controlada",
+                "Capacidad fallo de forma controlada" + ((" · " + detail[:400]) if detail else ""),
                 "CAPABILITY_FAILED",
-                stack_trace=traceback.format_exc()
+                stack_trace=traceback.format_exc(),
+                data={"error_type": type(e).__name__, "error_detail": str(e)[:1000]},
             )
 
         # PASO 5: Auditar COMPLETO
         duration_ms = time.time() * 1000 - start_ms
         self.audit.record_execution(
             mission.id, capability, result.ok, result.code, result.message,
-            payload_input=dict(payload or {}),
+            payload_input=dict(normalized_payload),
             payload_output=result.payload_output,
             stack_trace=result.stack_trace,
             duration_ms=duration_ms,

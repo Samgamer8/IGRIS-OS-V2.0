@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import sys
 
 from igris_os.security.sandbox import JobObjectSandbox, SandboxRun
+from igris_os.security.restricted import _filtered_env
 
 from .preflight import PreflightReport, ProgrammingPreflight
 
@@ -44,12 +46,15 @@ class EngineeringWorkflow:
             return EngineeringRunResult(
                 report, False, False, reason="El comando debe ser una lista no vacia")
         normalized = [str(item) for item in command]
-        if Path(normalized[0]).name.casefold() not in self._ALLOWED:
+        name = Path(normalized[0]).name.casefold()
+        if name not in self._ALLOWED and normalized[0] != sys.executable:
             return EngineeringRunResult(
                 report, False, False, reason="Ejecutable no permitido")
+        if name in {"python", "python.exe", "py", "py.exe"}:
+            normalized[0] = sys.executable
         safe_timeout = min(120, max(1, int(timeout)))
         run = self.sandbox.run(
-            normalized, cwd=str(project_root), timeout=safe_timeout)
+            normalized, cwd=str(project_root), timeout=safe_timeout, env=_filtered_env())
         return EngineeringRunResult(
             report, True, True, run=run,
             reason="ok" if run.returncode == 0 and not run.timed_out else "comando fallo")

@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import logging
 import multiprocessing
+import os
+import math
 import threading
 import time
 from typing import Any, Callable
@@ -36,6 +38,8 @@ _AI_ROUTES: dict[str, Callable[[Any, dict[str, Any]], dict[str, Any]]] = {
     "generate": lambda self, p: self.generate(
         p.get("prompt", ""), model=p.get("model", ""),
         thinking=bool(p.get("thinking", False))),
+    "generate_json": lambda self, p: self.generate_json(
+        p.get("prompt", ""), model=p.get("model", ""), schema=p.get("schema") or {}),
     "chat": lambda self, p: self.chat(
         p.get("messages") or [], model=p.get("model", "")),
     "health": lambda self, p: self.health(),
@@ -48,12 +52,12 @@ _AI_ROUTES: dict[str, Callable[[Any, dict[str, Any]], dict[str, Any]]] = {
 # -----------------------------------------------------------------------
 
 def _ai_worker(request_q: multiprocessing.Queue,
-               response_q: multiprocessing.Queue) -> None:
+               response_q: multiprocessing.Queue, timeout_s: float = 180) -> None:
     """Child process: reads requests from request_q, writes responses to response_q."""
     # Lazy import — only instantiate AIDaemon inside the child
     from igris_os.ai.daemon import AIDaemon
 
-    daemon = AIDaemon()
+    daemon = AIDaemon(timeout_s=timeout_s)
     logger.info("AI worker process started (pid=%d)", __import__("os").getpid())
 
     while True:
@@ -103,7 +107,14 @@ class AIProcessRunner:
     All public methods are safe to call from the Qt main thread.
     """
 
-    def __init__(self, timeout: float = 30.0) -> None:
+    def __init__(self, timeout: float | None = None) -> None:
+        if timeout is None:
+            try:
+                timeout = float(os.environ.get("IGRIS_AI_TIMEOUT", "180"))
+                if not math.isfinite(timeout) or not 1 <= timeout <= 900:
+                    raise ValueError("timeout fuera de rango")
+            except ValueError:
+                timeout = 180.0
         self._timeout = timeout
         self._process: multiprocessing.Process | None = None
         self._request_q: multiprocessing.Queue | None = None
@@ -125,7 +136,7 @@ class AIProcessRunner:
 
         self._process = multiprocessing.Process(
             target=_ai_worker,
-            args=(self._request_q, self._response_q),
+            args=(self._request_q, self._response_q, max(0.1, self._timeout - 5)),
             daemon=True,
             name="igris-ai",
         )
@@ -165,23 +176,37 @@ class AIProcessRunner:
         """Check if the subprocess is running."""
         return self._process is not None and self._process.is_alive()
 
+    @property
+    def busy(self) -> bool:
+        return self._call_lock.locked()
+
+    def _discard_timed_out_worker(self) -> None:
+        """Cancel only our IPC worker, keeping the user's Ollama server running."""
+        process = self._process
+        if process is not None and process.is_alive():
+            process.terminate()
+            process.join(timeout=2)
+            if process.is_alive():
+                process.kill()
+                process.join(timeout=1)
+        self._process = None
+        for channel in (self._request_q, self._response_q):
+            if channel is not None:
+                try:
+                    channel.cancel_join_thread()
+                    channel.close()
+                except (OSError, ValueError):
+                    pass
+        self._request_q = self._response_q = None
+
     # ------------------------------------------------------------------
     # Public API (thread-safe)
     # ------------------------------------------------------------------
 
     def health(self) -> dict[str, Any]:
-        """Health check via subprocess.
-
-        This is liveness-oriented: a live subprocess is considered healthy even
-        when the underlying model backend is not currently configured or has no
-        installed models. The direct daemon API still reports the stricter
-        backend readiness result.
-        """
+        """Preserva la disponibilidad real del backend y separa la del proceso."""
         result = self._call("health", timeout=5.0)
-        if result.get("ok") is False and isinstance(result.get("error"), str):
-            if "0 modelos" in result["error"]:
-                result = {**result, "ok": True, "status": "degraded", "error": None}
-        return result
+        return {**result, "process_alive": self.is_alive()}
 
     def models(self) -> dict[str, Any]:
         """List installed models via subprocess (full list)."""
@@ -213,9 +238,19 @@ class AIProcessRunner:
         raw = route(self, request.payload)
         return response_from_payload(raw, request_id=request.id)
 
-    def generate(self, prompt: str, model: str = "", *, thinking: bool = False) -> dict[str, Any]:
+    def generate(self, prompt: str, model: str = "", *, thinking: bool = False,
+                 output_limit: int | None = None) -> dict[str, Any]:
         """Generate text via subprocess."""
-        return self._call("generate", args=(prompt,), kwargs={"model": model, "thinking": thinking},
+        options = {"model": model, "thinking": thinking}
+        if output_limit is not None:
+            options['output_limit'] = output_limit
+        return self._call("generate", args=(prompt,), kwargs=options,
+                          timeout=self._timeout)
+
+    def generate_json(self, prompt: str, model: str, schema: dict) -> dict[str, Any]:
+        """Generate strict JSON via subprocess."""
+        return self._call("generate_json", args=(prompt,),
+                          kwargs={"model": model, "schema": schema},
                           timeout=self._timeout)
 
     def chat(self, messages: list, model: str = "", **kwargs: Any) -> dict[str, Any]:
@@ -271,4 +306,9 @@ class AIProcessRunner:
             # corrompía el protocolo (bug de race condition).
             logger.debug("descartando respuesta obsoleta id=%s", resp.get("id"))
 
-        return {"ok": False, "reason": f"timeout after {timeout}s", "method": method}
+        self._discard_timed_out_worker()
+        message = (f"La IA no respondio en {timeout:g} segundos. Se cancelo la espera "
+                   "y se reinicio el canal de comunicacion para no bloquear la siguiente orden. "
+                   "Ollama puede seguir cargando o procesando el modelo; revisa DIAGNOSTICAR_IGRIS.cmd.")
+        return {"ok": False, "reason": message, "error": message, "method": method,
+                "code": "AI_TIMEOUT", "model": (kwargs or {}).get("model", "")}

@@ -55,13 +55,15 @@ def build_status_line(
     del endpoint  # el endpoint configurado ya aparece en el tooltip
     active = summarize_backends(backends)
     if not active:
-        active = ["offline"]
-    model = last_model or (models[0] if models else "")
-    if last_backend:
+        return "offline · sin servidor IA disponible"
+    model = last_model if last_model in models else (models[0] if models else "")
+    if last_backend and last_backend in {name for name, _ in backends} and model:
         parts = [part for part in (model, last_backend) if part]
     else:
         parts = [model] if model else []
         parts.append(", ".join(active))
+        if not models:
+            parts.append("sin modelos anunciados")
     return " · ".join(parts) if parts else "offline"
 
 

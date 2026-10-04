@@ -40,7 +40,7 @@ def discover_projects() -> list[dict[str, object]]:
         if not path.is_dir():
             continue
         progress = path / "PROGRESS.json"
-        status = "Terminado" if (path / "VERIFICATION.json").is_file() else "En ejecución"
+        status = "Informe disponible" if (path / "VERIFICATION.json").is_file() else "Sin verificación"
         if progress.is_file():
             try:
                 data = json.loads(progress.read_text(encoding="utf-8"))

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "igris-os"
-version = "5.0.0rc1"
+version = "5.1.0a8"
 description = "Orquestador local con permisos y entregas ejecutables verificables"
 requires-python = ">=3.11"
 dependencies = ["requests>=2.31", "psutil>=5.9", "PyQt6>=6.4"]
@@ -13,7 +13,6 @@ dependencies = ["requests>=2.31", "psutil>=5.9", "PyQt6>=6.4"]
 igris = "igris_os.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "coverage>=7"]
 multiagent = ["langgraph>=0.2", "langchain-core>=0.3"]
 providers = ["litellm>=1.40", "python-dotenv>=1.0"]
 media = ["Pillow>=10.0", "numpy>=1.26"]
@@ -21,7 +20,8 @@ media = ["Pillow>=10.0", "numpy>=1.26"]
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"igris_os.games" = ["chess_baseline/*.gd", "chess_baseline/*.godot", "chess_baseline/*.tscn", "chess_baseline/*.md"]
+
 [tool.pytest.ini_options]
-addopts = "-q -p no:cacheprovider"
-testpaths = ["tests"]
-pythonpath = ["src"]
+addopts = "--import-mode=importlib"

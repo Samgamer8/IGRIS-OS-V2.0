@@ -4,9 +4,14 @@ import json
 import re
 import shutil
 import tempfile
+import textwrap
+import os
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
+from igris_os.games.chess_state import CHESS_STATE_SOURCE
 from igris_os.games.runtime import GodotRun, GodotRuntime
 from igris_os.games.verified_3d import VerifiedGodot3DFactory
 from igris_os.multi_agent.hierarchy import (
@@ -17,12 +22,17 @@ from igris_os.multi_agent.hierarchy import (
 )
 from igris_os.skills import build_engineering_catalog
 from igris_os.utils.json_parser import StrictJSONParser
+from igris_os.games.generation_budget import GenerationBudget, GenerationLimit, RepeatedGeneration
 
 CONTENT_SCHEMA = {
     "type": "object",
     "properties": {"content": {"type": "string"}},
     "required": ["content"],
 }
+
+
+class ModelUnavailableError(ValueError):
+    """Un fallo de transporte no se repara repitiendo un prompt de codigo."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,7 +252,7 @@ class SequentialGodotGameDeveloper:
     """Generates and repairs a Godot game one component at a time."""
 
     def __init__(self, client, workspace: Path, model: str,
-                 runtime: GodotRuntime | None = None) -> None:
+                 runtime: GodotRuntime | None = None, on_progress=None) -> None:
         self.client = client
         self.workspace = Path(workspace).resolve()
         self.model = model
@@ -250,15 +260,32 @@ class SequentialGodotGameDeveloper:
         self._models_used: list[str] = []
         self.skill_catalog = build_engineering_catalog()
         self.runtime = runtime or GodotRuntime(timeout=180)
+        self.on_progress = on_progress
+        self.budget = GenerationBudget()
+        self._checkpoint_project = None
+        self._checkpoint_data = {"version": 1, "components": {}, "complete": False}
+        # Both structured and raw fallback calls use the same bounded output size.
+        if hasattr(self.client, "_generate_ollama"):
+            self.client.output_token_limit = 4096
 
     def develop_chess_3d(self, objective: str, name: str, *,
                          confirmed: bool = False,
                          repair_rounds: int = 2,
                          resume: bool = False) -> SequentialGameResult:
+        print(f"[DEVELOP_CHESS_3D] Starting with resume={resume}, confirmed={confirmed}")
         if not confirmed:
             return SequentialGameResult(False, "Se necesita confirmacion")
-        target = self._project_path(name)
-        project = target if resume and target.is_dir() else self._fresh_project(name)
+        if not self.runtime.available:
+            return SequentialGameResult(
+                False, "Falta Godot para comprobar el ajedrez 3D",
+                diagnostics=("Abre DIAGNOSTICAR_IGRIS.cmd. Configura IGRIS_GODOT con el "
+                             "ejecutable de Godot 4 o coloca Godot en .tools/godot.",))
+        try:
+            target = self._project_path(name)
+            project = target if resume and target.is_dir() else self._fresh_project(name)
+        except (OSError, ValueError) as exc:
+            return SequentialGameResult(False, "No se pudo preparar el proyecto",
+                                        diagnostics=(str(exc),))
         if resume and target.is_dir():
             resume_marker = target / "_igris_resume_manifest.json"
             try:
@@ -269,15 +296,26 @@ class SequentialGodotGameDeveloper:
                     entry.get("project") for entry in manifest.get("resumed", [])}:
                 manifest.setdefault("resumed", []).append({
                     "project": str(target),
-                    "resumed_at": "2026-08-31",
+                    "resumed_at": datetime.now(timezone.utc).isoformat(),
                     "resume": True,
                 })
                 resume_marker.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        self._checkpoint_project = project
+        (project / "IGRIS_TASK.json").write_text(json.dumps({
+            "objective": getattr(self, "task_payload", {}).get("objective") or objective,
+            "payload": getattr(self, "task_payload", {}),
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
+        self._save_checkpoint("checking_existing" if resume else "starting")
         files: list[str] = []
         interfaces: dict[str, str] = {}
         diagnostics: list[str] = []
         try:
-            for component in CHESS_COMPONENTS:
+            for position, component in enumerate(CHESS_COMPONENTS):
+                self._generation_progress = 5 + int(80 * position / len(CHESS_COMPONENTS))
+                if self.on_progress:
+                    self.on_progress(5 + int(80 * position / len(CHESS_COMPONENTS)),
+                                     f"Generando componente {position + 1}/{len(CHESS_COMPONENTS)}: {component.path}")
+                print(f"[DEVELOP_CHESS_3D] Processing component: {component.path}")
                 existing = project / component.path
                 component_diagnostic = ""
                 if resume and existing.is_file():
@@ -311,6 +349,10 @@ class SequentialGodotGameDeveloper:
                                     raise ValueError(component_diagnostic)
                             files.append(component.path)
                             interfaces[component.path] = self._interfaces(current)
+                            self._checkpoint_data["components"][component.path] = "reused_after_verification"
+                            self._save_checkpoint("working", component.path)
+                            if self.on_progress:
+                                self.on_progress(self._generation_progress, "Reutilizado y verificado: " + component.path)
                             continue
                         component_diagnostic = (
                             checked.output + "\nCURRENT FILE TO REPAIR:\n" +
@@ -332,7 +374,6 @@ class SequentialGodotGameDeveloper:
                                 "chess_rules.gd"}:
                             obsolete = True
                         if obsolete:
-                            existing.unlink(missing_ok=True)
                             clean_error = error.split(
                                 "\nCURRENT FILE TO REPAIR:", 1)[0]
                             component_diagnostic = (
@@ -345,16 +386,27 @@ class SequentialGodotGameDeveloper:
                             component_diagnostic = (
                                 error + "\nCURRENT FILE TO REPAIR:\n" +
                                 current[-14000:])
-                content = self._generate_with_tournament(
-                    objective, component, interfaces,
-                    component_diagnostic, project)
+                if component.path == "chess_state.gd":
+                    content = self._prepare_chess_state(project)
+                    origin = "bundled_contract_verified"
+                else:
+                    content = self._generate_with_escalation(
+                        objective, component, interfaces,
+                        component_diagnostic, project)
+                    origin = "verified"
+                print(f"[DEVELOP_CHESS_3D] Generated {component.path}, length={len(content)}")
                 files.append(component.path)
                 interfaces[component.path] = self._interfaces(content)
+                self._checkpoint_data["components"][component.path] = origin
+                self._save_checkpoint("working", component.path)
         except (OSError, TypeError, ValueError) as exc:
+            self._save_checkpoint("blocked", component.path, str(exc))
             return SequentialGameResult(
-                False, "Fallo generando componentes", project,
+                False, "Proyecto detenido en " + component.path + "; avance guardado", project,
                 tuple(files), (str(exc),))
 
+        if self.on_progress:
+            self.on_progress(90, "Comprobando arranque y pruebas del ajedrez en Godot")
         check = self._check(project)
         for _ in range(max(0, repair_rounds)):
             if check.ok:
@@ -367,7 +419,7 @@ class SequentialGodotGameDeveloper:
                     component = next(c for c in CHESS_COMPONENTS
                                      if c.path == path)
                     current = (project / path).read_text(encoding="utf-8")
-                    repaired = self._generate_with_tournament(
+                    repaired = self._generate_with_escalation(
                         objective, component, interfaces,
                         diagnostic + "\nCURRENT FILE:\n" + current[-10000:],
                         project)
@@ -378,6 +430,7 @@ class SequentialGodotGameDeveloper:
             check = self._check(project)
         if not check.ok:
             diagnostics.append(check.output[-6000:])
+            self._save_checkpoint("blocked", "project_check", check.output[-2000:])
             return SequentialGameResult(
                 False, "Godot no pudo verificar el juego", project,
                 tuple(files), tuple(diagnostics))
@@ -386,21 +439,80 @@ class SequentialGodotGameDeveloper:
             "strategy": "sequential_godot_components",
             "model": self.model,
             "models_used": self._models_used,
+            "component_sources": self._checkpoint_data["components"],
             "skills_used": self.skill_catalog.loaded_names,
             "files": files,
             "godot_version": self.runtime.version(),
             "import_ok": True,
             "boot_ok": True,
+            "acceptance_verified": False,
+            "pending": ["Reglas completas de ajedrez", "Combates y animaciones del encargo",
+                        "Revision visual y de jugabilidad"],
         }, ensure_ascii=False, indent=2), encoding="utf-8")
+        self._save_checkpoint("component_checks_passed")
         return SequentialGameResult(
-            True, "Juego generado y verificado por componentes",
+            True, "Proyecto generado con comprobaciones de componentes y arranque; "
+                  "reglas completas, combates y aspecto pendientes de revisar",
             project, tuple(files), tuple(diagnostics))
+
+    def _prepare_chess_state(self, project: Path) -> str:
+        """Validate fixed infrastructure without spending an inference request.
+
+        Existing valid files have already been reused by the caller. Preserve an
+        invalid predecessor and restore it if the bundled replacement fails.
+        """
+        target = project / "chess_state.gd"
+        previous = target.read_bytes() if target.exists() else None
+        self._validate(target.name, CHESS_STATE_SOURCE)
+        if previous is not None:
+            self._save_attempt(project, target.name, "existing_project", "replaced_invalid",
+                               "Componente anterior no supero las comprobaciones",
+                               previous.decode("utf-8", errors="replace"))
+        try:
+            target.write_text(CHESS_STATE_SOURCE, encoding="utf-8")
+            checked = self.runtime.check_script(project, target.name)
+            if checked.ok:
+                checked = self._smoke_logic(project, target.name)
+            if not checked.ok:
+                raise ValueError("El contrato incluido no supera Godot:\n" + checked.output[-4000:])
+        except (OSError, ValueError):
+            if previous is None:
+                target.unlink(missing_ok=True)
+            else:
+                target.write_bytes(previous)
+            raise
+        if self.on_progress:
+            self.on_progress(getattr(self, "_generation_progress", 5),
+                             "Estado del tablero comprobado en Godot; sin llamada al modelo")
+        return CHESS_STATE_SOURCE
+
+    def _save_attempt(self, project, component, model, stage, error="", content="", metadata=None):
+        # JSON preserves rejected source without making Godot import invalid .gd files.
+        folder = Path(project) / "IGRIS_DIAGNOSTICS"
+        folder.mkdir(exist_ok=True)
+        path = folder / (Path(component).stem + "_" + uuid4().hex + ".json")
+        record = {"component": component, "model": model, "stage": stage,
+                  "error": error, "content": content,
+                  "metadata": metadata or {}, "date": datetime.now(timezone.utc).isoformat()}
+        path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+        self._checkpoint_data["last_diagnostic"] = str(path.relative_to(project))
+
+    def _save_checkpoint(self, state, component="", error=""):
+        self._checkpoint_data.update(state=state, current_component=component,
+                                     error=error[-2000:], budget=self.budget.report(),
+                                     models_used=list(self._models_used))
+        if self._checkpoint_project is None:
+            return
+        path = self._checkpoint_project / "IGRIS_PROGRESS.json"
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(self._checkpoint_data, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(temporary, path)
 
     def _fresh_project(self, name: str) -> Path:
         target = self._project_path(name)
         self.workspace.mkdir(parents=True, exist_ok=True)
         if target.exists():
-            shutil.rmtree(target)
+            raise FileExistsError("Ya existe el proyecto; elige otro nombre o reanuda: " + str(target))
         return VerifiedGodot3DFactory(self.workspace).create(
             target.name, confirmed=True)
 
@@ -431,6 +543,9 @@ class SequentialGodotGameDeveloper:
             "GDScript is not Python: NEVER use list/dictionary comprehensions, "
             "array multiplication, Python-style conditional expressions or tuple "
             "unpacking. Build nested arrays with explicit loops and append(). "
+            "Use Array or Array[Array], never Array[Array[Dictionary]]: nested typed "
+            "collections are unsupported. Start the file with class_name and extends, "
+            "never wrap the whole file in an inner class declaration. "
             "Every function must have valid indentation and every bracket must "
             "close. Prefer simple parse-safe code over clever compact syntax. "
             "No assets, addons, network, TODO, examples or placeholders.\n"
@@ -450,9 +565,15 @@ class SequentialGodotGameDeveloper:
             prompt += ("GODOT ERROR TO REPAIR:\n" + diagnostic[-12000:] +
                        "\nReturn the complete corrected file.\n")
         generate_json = getattr(self.client, "generate_json", None)
+        self.budget.before_call(component.path, selected_model)
+        self._save_checkpoint("generating", component.path)
         reply = (generate_json(prompt, selected_model, CONTENT_SCHEMA)
                  if callable(generate_json)
                  else self.client.generate(prompt, selected_model))
+        if self._checkpoint_project is not None:
+            self._save_attempt(self._checkpoint_project, component.path, selected_model,
+                               "structured_response", reply.error, reply.text,
+                               getattr(reply, "metadata", {}))
         content = ""
         if reply.ok:
             try:
@@ -463,23 +584,32 @@ class SequentialGodotGameDeveloper:
         else:
             # A transport/model failure cannot be repaired by asking the same
             # unavailable model for a different output wrapper. Escalate now.
-            raise ValueError(reply.error or "Modelo sin respuesta")
+            raise ModelUnavailableError(reply.error or "Modelo sin respuesta")
         if not content:
             strict_generate = getattr(
                 self.client, "generate_strict", None)
             if not callable(strict_generate):
                 strict_generate = self.client.generate
+            self.budget.before_call(component.path, selected_model)
+            self._save_checkpoint("generating_raw", component.path)
             fallback = strict_generate(
                 prompt + "\nThe structured response failed. Return the complete "
                 "raw script between literal lines BEGIN_GDSCRIPT and "
                 "END_GDSCRIPT. Do not JSON-escape it.", selected_model)
+            if self._checkpoint_project is not None:
+                self._save_attempt(self._checkpoint_project, component.path, selected_model,
+                                   "raw_response", fallback.error, fallback.text,
+                                   getattr(fallback, "metadata", {}))
             if not fallback.ok:
                 errors = "; ".join(
                     item for item in (reply.error, fallback.error) if item)
-                raise ValueError(errors or "Modelo sin respuesta")
+                raise ModelUnavailableError(errors or "Modelo sin respuesta")
             content = self._extract_raw_script(fallback.text)
         if not content:
             raise ValueError("Componente vacio: " + component.path)
+        if not hasattr(self, "_last_candidate"):
+            self._last_candidate = {}
+        self._last_candidate[component.path] = content
         return content + "\n"
 
     @staticmethod
@@ -495,6 +625,8 @@ class SequentialGodotGameDeveloper:
         if fenced:
             return fenced.group(1).strip()
         stripped = text.strip()
+        if re.match(r"class\s+\w+\s+extends\s+\w+\s*:", stripped):
+            return stripped
         starts = [
             index for marker in ("extends ", "class_name ")
             if (index := stripped.find(marker)) >= 0
@@ -511,8 +643,11 @@ class SequentialGodotGameDeveloper:
             try:
                 content = self._generate(
                     objective, component, interfaces, feedback, model)
+                content = self._mechanical_repairs(content)
                 self._validate(component.path, content)
                 return content
+            except (ModelUnavailableError, GenerationLimit, RepeatedGeneration):
+                raise
             except (TypeError, ValueError) as exc:
                 last_error = str(exc)
                 feedback = (
@@ -523,33 +658,14 @@ class SequentialGodotGameDeveloper:
                 ).strip()
         raise ValueError(last_error or "Componente no valido")
 
-    def _generate_compilable(
-            self, objective: str, component: GodotComponent,
-            interfaces: dict[str, str], diagnostic: str,
-            project: Path) -> str:
-        feedback = diagnostic
-        last_error = ""
-        for attempt in range(1, 4):
-            content = self._generate_valid(
-                objective, component, interfaces, feedback,
-                model=self._active_model)
-            content = self._mechanical_repairs(content)
-            (project / component.path).write_text(
-                content, encoding="utf-8")
-            checked = self.runtime.check_script(
-                project, component.path)
-            if checked.ok:
-                return content
-            last_error = checked.output[-6000:]
-            feedback = (
-                diagnostic +
-                f"\nGODOT COMPILE ATTEMPT {attempt} FAILED:\n" +
-                last_error +
-                "\nCURRENT REJECTED FILE (repair this exact file):\n" +
-                content[-14000:] +
-                "\nReturn a complete replacement, preserving valid behavior.")
-        raise ValueError(
-            component.path + " no compila: " + last_error[-2000:])
+    def _generate_compilable(self, objective, component, interfaces, diagnostic, project):
+        content = self._generate_valid(objective, component, interfaces, diagnostic,
+                                       model=self._active_model, attempts=1)
+        (project / component.path).write_text(content, encoding="utf-8")
+        checked = self.runtime.check_script(project, component.path)
+        if not checked.ok:
+            raise ValueError("GODOT COMPILE FAILED:\n" + checked.output[-4000:])
+        return content
 
     def _generate_with_tournament(
             self, objective: str, component: GodotComponent,
@@ -663,50 +779,71 @@ class SequentialGodotGameDeveloper:
             component.path + " agoto torneos de especialistas:\n" +
             accumulated[-6000:])
 
-    def _generate_with_escalation(
-            self, objective: str, component: GodotComponent,
-            interfaces: dict[str, str], diagnostic: str,
-            project: Path) -> str:
-        failures: list[str] = []
-        for model in self._model_candidates():
+    def _generate_with_escalation(self, objective, component, interfaces, diagnostic, project):
+        failures = []
+        feedback = diagnostic
+        for model in self._model_candidates()[:2]:
             self._active_model = model
-            try:
-                content = self._generate_compilable(
-                    objective, component, interfaces,
-                    diagnostic + "\nMODEL ESCALATION: " + model, project)
-                if model not in self._models_used:
-                    self._models_used.append(model)
-                return content
-            except (TypeError, ValueError) as exc:
-                failures.append(model + ": " + str(exc))
-        raise ValueError(
-            component.path + " agoto modelos disponibles:\n" +
-            "\n".join(failures)[-6000:])
+            for attempt in range(2):
+                # A failed transport must not inherit another model's candidate.
+                self._last_candidate = {}
+                if self.on_progress:
+                    self.on_progress(getattr(self, "_generation_progress", 1),
+                                     "Trabajando: " + component.path + " · " + model +
+                                     f" · intento {attempt + 1}/2")
+                content = ""
+                try:
+                    content = self._generate_compilable(
+                        objective, component, interfaces, feedback, project)
+                    checked = (self._smoke_visual(project, component.path)
+                               if component.path.endswith("_visual.gd") else
+                               self._smoke_logic(project, component.path)
+                               if component.path in {"chess_state.gd", "pawn_rules.gd", "sliding_rules.gd", "jump_rules.gd", "chess_rules.gd"}
+                               else GodotRun(True, 0, "compile checked"))
+                    if not checked.ok:
+                        raise ValueError("SEMANTIC TEST FAILED:\n" + checked.output[-4000:])
+                    if model not in self._models_used:
+                        self._models_used.append(model)
+                    return content
+                except GenerationLimit:
+                    raise
+                except (ModelUnavailableError, RepeatedGeneration) as exc:
+                    failures.append(model + ": " + str(exc))
+                    self._save_attempt(project, component.path, model, "generation_failed", str(exc))
+                    break
+                except (TypeError, ValueError) as exc:
+                    failures.append(model + ": " + str(exc))
+                    rejected = content or getattr(self, "_last_candidate", {}).get(component.path, "")
+                    self._save_attempt(project, component.path, model, "rejected", str(exc), rejected)
+                    if rejected:
+                        try:
+                            self.budget.observe(component.path, model, rejected)
+                        except RepeatedGeneration:
+                            failures.append("Respuesta repetida; se abandona este modelo")
+                            break
+                    feedback = (diagnostic + "\n" + str(exc)[-3000:] +
+                                "\nCURRENT REJECTED FILE:\n" + rejected[-10000:])
+        raise ValueError(component.path + " bloqueado tras intentos limitados:\n" +
+                         "\n".join(failures)[-4000:])
 
     def _model_candidates(self) -> tuple[str, ...]:
-        preferred = (
-            self.model,
-            "stable-code:3b-code-q4_0",
-            "qwen2.5-coder:7b",
-            "qwen2.5-coder:14b",
-            "deepseek-coder-v2:16b",
-            "devstral:24b",
-            "gemma4:26b",
-        )
+        from igris_os.ai.model_selection import coding_model_candidates
         try:
             installed = set(self.client.models())
         except (AttributeError, TypeError, OSError):
             installed = {self.model}
-        selected: list[str] = []
-        for model in preferred:
-            if (model in installed and "embed" not in model.casefold()
-                    and model not in selected):
-                selected.append(model)
-        return tuple(selected) or (self.model,)
+        return coding_model_candidates(installed, self.model)
 
     @staticmethod
     def _mechanical_repairs(content: str) -> str:
         """Fix unambiguous model syntax slips without inventing behavior."""
+        wrapper = re.fullmatch(r"\s*class\s+(\w+)\s+extends\s+(\w+)\s*:\s*\n(.*)", content, re.DOTALL)
+        if wrapper and all(not line.strip() or line[0].isspace()
+                           for line in wrapper.group(3).splitlines()):
+            content = ("class_name " + wrapper.group(1) + "\nextends " + wrapper.group(2) +
+                       "\n" + textwrap.dedent(wrapper.group(3)))
+        # Limit repair to type annotations, never change runtime indexing or strings.
+        content = re.sub(r"(?m)^(\s*var\s+\w+\s*:\s*)Array\[Array\[(\w+)\]\]", r"\1Array[Array]", content)
         counter = 0
 
         def name_discarded_loop(match: re.Match[str]) -> str:
@@ -788,14 +925,14 @@ class SequentialGodotGameDeveloper:
                 structural.append(
                     "chess_state es RefCounted y no puede depender de _ready")
             init_match = re.search(
-                r"func\s+_init\s*\([^)]*\)\s*:(.*?)(?=\nfunc\s|\Z)",
+                r"func\s+_init\s*\([^)]*\)\s*(?:->\s*void\s*)?:(.*?)(?=\nfunc\s|\Z)",
                 content, re.DOTALL)
             if not init_match or "setup_board(" not in init_match.group(1):
                 structural.append(
                     "chess_state debe llamar setup_board desde _init")
-            if re.search(r"board\s*\[[^\n]+\]\s*=\s*['\"](?:pawn|rook|knight|bishop|queen|king)['\"]", content):
-                structural.append(
-                    "chess_state debe guardar diccionarios con type y side")
+            # Do not infer the runtime cell type from assignment text. The old
+            # regex also rejected board[y][x]["type"] = "pawn" and comments.
+            # _smoke_logic checks all 64 real cells, including Dictionary keys.
         if path == "chess_rules.gd" and re.search(
                 r":\s*(PawnRules|SlidingRules|JumpRules)\b", content):
             structural.append(
@@ -972,6 +1109,8 @@ class SequentialGodotGameDeveloper:
         finally:
             harness.unlink(missing_ok=True)
 
+
+
     def _smoke_logic(self, project: Path, path: str) -> GodotRun:
         if path == "chess_rules.gd":
             return self._smoke_rules(project)
@@ -1006,6 +1145,18 @@ class SequentialGodotGameDeveloper:
                 "func _init() -> void:\n"
                 "    var state = load('res://chess_state.gd').new()\n"
                 "    if not _require(state.board.size() == 8, 'board_rows'): quit(1); return\n"
+                "    var back_rank = ['rook', 'knight', 'bishop', 'queen', 'king', 'bishop', 'knight', 'rook']\n"
+                "    for y in range(8):\n"
+                "        if not _require(state.board[y].size() == 8, 'board_columns'): quit(1); return\n"
+                "        for x in range(8):\n"
+                "            var square = state.board[y][x]\n"
+                "            if y >= 2 and y <= 5:\n"
+                "                if not _require(square == null, 'empty_center'): quit(1); return\n"
+                "            else:\n"
+                "                if not _require(square is Dictionary, 'occupied_square: board[%s][%s] debe ser Dictionary con type y side; recibido %s' % [y, x, type_string(typeof(square))]): quit(1); return\n"
+                "                var expected_side = 'white' if y < 2 else 'black'\n"
+                "                var expected_type = 'pawn' if y == 1 or y == 6 else back_rank[x]\n"
+                "                if not _require(square.get('side') == expected_side and square.get('type') == expected_type, 'initial_piece_position: board[%s][%s] esperaba %s/%s; recibido %s' % [y, x, expected_type, expected_side, str(square)]): quit(1); return\n"
                 "    var white_pawn = state.board[1][4]\n"
                 "    if white_pawn == null:\n"
                 "        push_error('IGRIS_RULE_FAILED:piece_identity_null')\n"
@@ -1071,140 +1222,7 @@ class SequentialGodotGameDeveloper:
                 "    var state = load('res://chess_state.gd').new()\n"
                 "    var sliding = load('res://sliding_rules.gd').new()\n"
                 "    var board = state.board\n"
-                "    if not _require(sliding.rook(board, 'white', 0, 0, 0, 3), 'rook_nocapture'): quit(1); return\n"
-                "    if not _require(not sliding.rook(board, 'white', 0, 0, 0, 0), 'rook_zero'): quit(1); return\n"
-                "    board[1][0] = {'type': 'pawn', 'side': 'white'}\n"
-                "    if not _require(not sliding.rook(board, 'white', 0, 0, 0, 3), 'rook_blocked'): quit(1); return\n"
                 "    board[1][0] = null\n"
-                "    if not _require(sliding.bishop(board, 'white', 2, 2, 4, 4), 'bishop_nocapture'): quit(1); return\n"
-                "    board[3][3] = {'type': 'pawn', 'side': 'white'}\n"
-                "    if not _require(not sliding.bishop(board, 'white', 2, 2, 4, 4), 'bishop_blocked'): quit(1); return\n"
-                "    board[3][3] = null\n"
-                "    if not _require(sliding.queen(board, 'white', 3, 3, 3, 5), 'queen_nocapture'): quit(1); return\n"
-                "    if not _require(not sliding.queen(board, 'white', 3, 3, 3, 3), 'queen_zero'): quit(1); return\n"
-                "    print('IGRIS_LOGIC_SMOKE_OK')\n"
-                "    quit(0)\n"
-            )
-        if path == "jump_rules.gd":
-            return (
-                "extends SceneTree\n"
-                "func _require(value: bool, label: String) -> bool:\n"
-                "    if not value:\n"
-                "        push_error('IGRIS_RULE_FAILED:' + label)\n"
-                "        return false\n"
-                "    return true\n"
-                "func _init() -> void:\n"
-                "    var state = load('res://chess_state.gd').new()\n"
-                "    var jump = load('res://jump_rules.gd').new()\n"
-                "    var board = state.board\n"
-                "    if not _require(jump.is_knight_move(board, 'white', 1, 0, 2, 2), 'knight_jump'): quit(1); return\n"
-                "    if not _require(not jump.is_knight_move(board, 'white', 1, 0, 1, 2), 'knight_gap'): quit(1); return\n"
-                "    if not _require(jump.is_king_move(board, 'white', 4, 4, 4, 5), 'king_one'): quit(1); return\n"
-                "    if not _require(not jump.is_king_move(board, 'white', 4, 4, 4, 4), 'king_zero'): quit(1); return\n"
-                "    print('IGRIS_LOGIC_SMOKE_OK')\n"
-                "    quit(0)\n"
-            )
-        return ""
-
-    def _smoke_logic(self, project: Path, path: str) -> GodotRun:
-        if path == "chess_rules.gd":
-            return self._smoke_rules(project)
-        harness_name = f"_igris_{path.replace('.', '_')}_logic_smoke.gd"
-        harness = project / harness_name
-        harness.write_text(
-            self._logic_smoke_for(path),
-            encoding="utf-8")
-        try:
-            runner = getattr(self.runtime, "run_script", None)
-            if not callable(runner):
-                return GodotRun(True, 0, "runtime smoke unsupported by test double")
-            result = runner(project, harness_name)
-            if result.ok and "IGRIS_LOGIC_SMOKE_OK" not in (result.output or ""):
-                result = GodotRun(False, result.returncode,
-                                  result.output +
-                                  "\nIGRIS_LOGIC_SMOKE_OK no se imprimio en salida estandar")
-            return result
-        finally:
-            harness.unlink(missing_ok=True)
-
-    @staticmethod
-    def _logic_smoke_for(path: str) -> str:
-        if path == "chess_state.gd":
-            return (
-                "extends SceneTree\n"
-                "func _require(value: bool, label: String) -> bool:\n"
-                "    if not value:\n"
-                "        push_error('IGRIS_RULE_FAILED:' + label)\n"
-                "        return false\n"
-                "    return true\n"
-                "func _init() -> void:\n"
-                "    var state = load('res://chess_state.gd').new()\n"
-                "    if not _require(state.board.size() == 8, 'board_rows'): quit(1); return\n"
-                "    var white_pawn = state.board[1][4]\n"
-                "    if white_pawn == null:\n"
-                "        push_error('IGRIS_RULE_FAILED:piece_identity_null')\n"
-                "        quit(1)\n"
-                "        return\n"
-                "    if not _require(white_pawn.get('type') == 'pawn' and white_pawn.get('side') == 'white', 'piece_identity'): quit(1); return\n"
-                "    var black_king = state.board[7][4]\n"
-                "    if black_king == null:\n"
-                "        push_error('IGRIS_RULE_FAILED:black_king_null')\n"
-                "        quit(1)\n"
-                "        return\n"
-                "    if not _require(black_king.get('type') == 'king' and black_king.get('side') == 'black', 'black_king'): quit(1); return\n"
-                "    var current_turn = state.current_turn\n"
-                "    if not _require(current_turn == 'white', 'current_turn'): quit(1); return\n"
-                "    var piece = state.get_piece(4, 1)\n"
-                "    if piece == null:\n"
-                "        push_error('IGRIS_RULE_FAILED:get_piece_null')\n"
-                "        quit(1)\n"
-                "        return\n"
-                "    if not _require(piece.get('type') == 'pawn', 'get_piece'): quit(1); return\n"
-                "    state.move_piece(4, 1, 4, 3)\n"
-                "    if not _require(state.board[1][4] == null, 'move_piece_clear'): quit(1); return\n"
-                "    if not _require(state.board[3][4] is Dictionary, 'move_piece_set'): quit(1); return\n"
-                "    if not _require(state.current_turn == 'black', 'turn_switch'): quit(1); return\n"
-                "    print('IGRIS_LOGIC_SMOKE_OK')\n"
-                "    quit(0)\n"
-            )
-        if path == "pawn_rules.gd":
-            return (
-                "extends SceneTree\n"
-                "func _require(value: bool, label: String) -> bool:\n"
-                "    if not value:\n"
-                "        push_error('IGRIS_RULE_FAILED:' + label)\n"
-                "        return false\n"
-                "    return true\n"
-                "func _init() -> void:\n"
-                "    var state = load('res://chess_state.gd').new()\n"
-                "    var pawn = load('res://pawn_rules.gd').new()\n"
-                "    var board = state.board\n"
-                "    if not _require(pawn.is_valid_pawn_move(board, 'white', 4, 1, 4, 3), 'pawn_double'): quit(1); return\n"
-                "    if not _require(not pawn.is_valid_pawn_move(board, 'white', 4, 1, 4, 4), 'pawn_too_far'): quit(1); return\n"
-                "    board[2][4] = {'type': 'knight', 'side': 'black'}\n"
-                "    if not _require(not pawn.is_valid_pawn_move(board, 'white', 4, 1, 4, 3), 'pawn_blocked'): quit(1); return\n"
-                "    board[2][4] = null\n"
-                "    board[2][5] = {'type': 'pawn', 'side': 'black'}\n"
-                "    if not _require(pawn.is_valid_pawn_move(board, 'white', 4, 1, 5, 2), 'pawn_capture'): quit(1); return\n"
-                "    board[2][5] = {'type': 'pawn', 'side': 'white'}\n"
-                "    if not _require(not pawn.is_valid_pawn_move(board, 'white', 4, 1, 5, 2), 'pawn_capture_friendly'): quit(1); return\n"
-                "    board[2][5] = null\n"
-                "    if not _require(not pawn.is_valid_pawn_move(board, 'white', 4, 1, 4, 1), 'pawn_zero'): quit(1); return\n"
-                "    print('IGRIS_LOGIC_SMOKE_OK')\n"
-                "    quit(0)\n"
-            )
-        if path == "sliding_rules.gd":
-            return (
-                "extends SceneTree\n"
-                "func _require(value: bool, label: String) -> bool:\n"
-                "    if not value:\n"
-                "        push_error('IGRIS_RULE_FAILED:' + label)\n"
-                "        return false\n"
-                "    return true\n"
-                "func _init() -> void:\n"
-                "    var state = load('res://chess_state.gd').new()\n"
-                "    var sliding = load('res://sliding_rules.gd').new()\n"
-                "    var board = state.board\n"
                 "    if not _require(sliding.rook(board, 'white', 0, 0, 0, 3), 'rook_nocapture'): quit(1); return\n"
                 "    if not _require(not sliding.rook(board, 'white', 0, 0, 0, 0), 'rook_zero'): quit(1); return\n"
                 "    board[1][0] = {'type': 'pawn', 'side': 'white'}\n"

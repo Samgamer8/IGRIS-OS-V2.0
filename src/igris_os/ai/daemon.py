@@ -23,12 +23,14 @@ Los metodos delegan en ``OllamaClient`` sin modificarlo.
 from __future__ import annotations
 
 import time
+import copy
 from typing import Any
 
 from .ollama import ModelReply, OllamaClient
+from .frontier_gateway import build_model_client
 
 
-_DEFAULT_TIMEOUT_S: float = 30.0
+_DEFAULT_TIMEOUT_S: float = 180.0
 
 
 class AIDaemon:
@@ -36,11 +38,11 @@ class AIDaemon:
 
     def __init__(
         self,
-        client: OllamaClient | None = None,
+        client: Any | None = None,
         timeout_s: float = _DEFAULT_TIMEOUT_S,
     ) -> None:
-        self._client = client or OllamaClient()
         self._timeout = max(0.5, float(timeout_s))
+        self._client = client or build_model_client(timeout=self._timeout)
 
     # ---- PROBE ---------------------------------------------------------
     def health(self) -> dict[str, Any]:
@@ -95,12 +97,22 @@ class AIDaemon:
         return self.generate(prompt, model=model)
 
     # ---- DIRECTO -------------------------------------------------------
-    def generate(self, prompt: str, model: str = "", *, thinking: bool = False) -> dict[str, Any]:
+    def generate(self, prompt: str, model: str = "", *, thinking: bool = False,
+                 output_limit: int | None = None) -> dict[str, Any]:
         t0 = time.perf_counter()
         if not prompt or not prompt.strip():
             return _err(ValueError("prompt vacio"), t0)
         try:
-            reply: ModelReply = self._client.generate(prompt, model, thinking=thinking)
+            client = self._client
+            if output_limit is not None:
+                if isinstance(output_limit, bool) or not isinstance(output_limit, int) or not 256 <= output_limit <= 8192:
+                    raise ValueError('Limite de salida invalido')
+                client = copy.copy(client)
+                client.output_token_limit = output_limit
+                if hasattr(client, 'local'):
+                    client.local = copy.copy(client.local)
+                    client.local.output_token_limit = output_limit
+            reply: ModelReply = client.generate(prompt, model, thinking=thinking)
         except Exception as exc:                              # noqa: BLE001
             return _err(exc, t0)
         return {
@@ -111,6 +123,25 @@ class AIDaemon:
             "model": reply.model,
             "reasoning": reply.reasoning or None,
             "backend": reply.backend or None,
+        }
+
+    def generate_json(self, prompt: str, model: str, schema: dict) -> dict[str, Any]:
+        """Generacion estructurada a traves del proveedor seleccionado."""
+        t0 = time.perf_counter()
+        if not prompt or not prompt.strip() or not isinstance(schema, dict):
+            return _err(ValueError("solicitud JSON incompleta"), t0)
+        try:
+            reply: ModelReply = self._client.generate_json(prompt, model, schema)
+        except Exception as exc:
+            return _err(exc, t0)
+        return {
+            "ok": bool(reply.ok),
+            "text": reply.text,
+            "error": reply.error or None,
+            "latency_ms": _ms(t0),
+            "model": reply.model,
+            "backend": reply.backend or None,
+            "metadata": dict(getattr(reply, "metadata", {}) or {}),
         }
 
 

@@ -95,6 +95,11 @@ class SettingsDialog(QDialog):
         widget = QWidget()
         layout = QVBoxLayout(widget)
         form = QFormLayout()
+        self.panel_mode = QComboBox()
+        self.panel_mode.addItem('Moderno - conversacion ampliada', 'modern')
+        self.panel_mode.addItem('Original - panel cinematografico', 'original')
+        self.panel_mode.setCurrentIndex(max(0, self.panel_mode.findData(self.settings.get('panel_mode', 'modern'))))
+        form.addRow('Panel de uso:', self.panel_mode)
         self.primary_color = QPushButton(self.settings.get("primary_color", "#d11124"))
         self.primary_color.clicked.connect(self._pick_color("primary_color"))
         form.addRow("Color primario:", self.primary_color)
@@ -263,6 +268,7 @@ class SettingsDialog(QDialog):
             QMessageBox.warning(self, "Voz", f"No se pudo guardar la muestra: {exc}")
 
     def _save(self):
+        self.settings['panel_mode'] = self.panel_mode.currentData()
         self.settings["language"] = self.language_combo.currentText()
         self.settings["template"] = self.template_combo.currentText()
         self.settings["resolution"] = self.resolution_combo.currentText()

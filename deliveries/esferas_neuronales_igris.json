@@ -1,0 +1,28 @@
+{
+  "objective": "ok igris , te puedo pedir que me hagas una imagen visual de una esfera de pensamiento neuronal parecido a la que sale en la pelicula iron-man de jarvis? en la que sale utron tambien con otra esfera similar",
+  "capability": "image.neural_sphere",
+  "mission_id": "ff0dc2fd86a448e0978d4524ce0409ec",
+  "state": "completed",
+  "elapsed_seconds": 0.596,
+  "llm_calls": 0,
+  "artifact": {
+    "verified": true,
+    "output": "C:\\Users\\samva\\OneDrive\\Escritorio\\IGRIS OS\\runtime\\acceptance\\neural-image\\missions\\ff0dc2fd86a448e0978d4524ce0409ec\\output\\esfera_neuronal_680b696705ca.png",
+    "sha256": "aada901dd43a3c1ae095ca5cf513ed2526bb726e5fb12d1fb8fad4fc8521d7f0",
+    "width": 1920,
+    "height": 1080,
+    "spheres": 2,
+    "visible_sample_fraction": 0.0858,
+    "sampling_scope": "Region de cada esfera; el margen vacio no cuenta como fallo",
+    "method": "Dibujo programatico local con Qt; no IA generativa",
+    "verification_scope": "Formato, dimensiones, contenido visible e integridad; no evaluacion artistica",
+    "report": "C:\\Users\\samva\\OneDrive\\Escritorio\\IGRIS OS\\runtime\\acceptance\\neural-image\\missions\\ff0dc2fd86a448e0978d4524ce0409ec\\output\\esfera_neuronal_680b696705ca.json",
+    "media_type": "image/png"
+  },
+  "published_copy": "C:\\Users\\samva\\OneDrive\\Escritorio\\IGRIS OS\\deliveries\\esferas_neuronales_igris.png",
+  "live_missions_untouched": true,
+  "regression_tests": {
+    "original": 59,
+    "hybrid": 71
+  }
+}

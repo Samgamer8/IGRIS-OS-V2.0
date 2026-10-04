@@ -20,7 +20,7 @@ class GameDevelopmentResult:
 
 
 class GodotGameDeveloper:
-    """Genera código Godot completo en un staging y rechaza texto no aplicable."""
+    """Genera código en staging y exige importacion y arranque en Godot."""
 
     _ALLOWED_SUFFIXES = frozenset({".gd", ".tscn", ".md"})
     _MAX_FILES = 48
@@ -36,6 +36,12 @@ class GodotGameDeveloper:
                 confirmed: bool = False) -> GameDevelopmentResult:
         if not confirmed:
             return GameDevelopmentResult(False, "Se necesita confirmacion")
+        runtime = GodotRuntime()
+        if not runtime.available:
+            return GameDevelopmentResult(
+                False, "Falta Godot para generar y comprobar el juego",
+                diagnostics=("Abre DIAGNOSTICAR_IGRIS.cmd. Configura IGRIS_GODOT con la ruta "
+                             "del ejecutable Godot 4, o coloca Godot en .tools/godot.",))
         normalized_genre = genre.casefold().strip().replace("-", "_")
         if normalized_genre.endswith("_3d") or normalized_genre == "3d":
             project = VerifiedGodot3DFactory(self.workspace).create(
@@ -77,7 +83,9 @@ class GodotGameDeveloper:
                      else self.client.generate(attempt_prompt, self.model))
             if not reply.ok:
                 diagnostics.append(reply.error or "model_unavailable")
-                continue
+                return GameDevelopmentResult(
+                    False, "El modelo no pudo generar el juego", project,
+                    diagnostics=tuple(diagnostics))
             try:
                 package = StrictJSONParser.extract(reply.text)
                 files = package.get("files")
@@ -92,43 +100,59 @@ class GodotGameDeveloper:
                 if "main.gd" not in changed:
                     raise ValueError("Falta main.gd en la entrega")
                 break
-            except (ValueError, TypeError, KeyError) as exc:
+            except (OSError, ValueError, TypeError, KeyError) as exc:
                 diagnostics.append(f"intento {attempt}: {exc}")
         else:
             return GameDevelopmentResult(
                 False, "El modelo no entrego código Godot aplicable", project,
                 diagnostics=tuple(diagnostics))
-        runtime = GodotRuntime()
-        if runtime.available:
-            check = runtime.run(project, frames=2)
-            if not check.ok:
-                return GameDevelopmentResult(
-                    False, "El código generado no inicia en Godot", project,
-                    tuple(changed), tuple(diagnostics + [check.output[-1200:]]))
+        check = runtime.import_project(project)
+        if check.ok:
+            check = runtime.run(project, frames=60)
+        if not check.ok:
+            return GameDevelopmentResult(
+                False, "El código generado no inicia en Godot", project,
+                tuple(changed), tuple(diagnostics + [check.output[-1200:]]))
         (project / "CODE_DELIVERY.json").write_text(json.dumps({
             "model": self.model,
             "generated_files": changed,
             "godot_checked": runtime.available,
+            "checks": ["import", "headless_boot_60_frames"],
+            "acceptance_verified": False,
+            "pending": ["Reglas completas", "Jugabilidad", "Animaciones y calidad visual"],
         }, ensure_ascii=False, indent=2), encoding="utf-8")
         return GameDevelopmentResult(
-            True, "Código Godot generado", project, tuple(changed))
+            True, "Código Godot con arranque comprobado; jugabilidad y aspecto pendientes de revisar",
+            project, tuple(changed))
 
     def _write_files(self, project: Path, files: list[object]) -> list[str]:
         changed: list[str] = []
+        validated: list[tuple[Path, str]] = []
+        seen: set[str] = set()
         for item in files:
             if not isinstance(item, dict):
                 raise ValueError("Elemento de archivo inválido")
             relative = Path(str(item.get("path", "")).replace("\\", "/"))
-            content = str(item.get("content", ""))
+            content = item.get("content", "")
             target = (project / relative).resolve()
-            if (not relative.name or relative.is_absolute() or
+            if (not relative.name or relative.is_absolute() or ":" in str(relative) or
+                    ".." in relative.parts or
                     not target.is_relative_to(project) or
                     target.suffix.casefold() not in self._ALLOWED_SUFFIXES or
                     relative.as_posix() == "project.godot"):
                 raise ValueError("Ruta de código no permitida: " + relative.as_posix())
-            if not content.strip() or len(content.encode("utf-8")) > self._MAX_FILE_BYTES:
+            if (not isinstance(content, str) or not content.strip()
+                    or len(content.encode("utf-8")) > self._MAX_FILE_BYTES):
                 raise ValueError("Contenido inválido: " + relative.as_posix())
+            key = relative.as_posix().casefold()
+            if key in seen:
+                raise ValueError("Ruta duplicada: " + str(relative))
+            seen.add(key)
+            validated.append((target, content))
+            changed.append(relative.as_posix())
+        if "main.gd" not in changed:
+            raise ValueError("Falta main.gd en la entrega")
+        for target, content in validated:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content, encoding="utf-8")
-            changed.append(relative.as_posix())
         return changed

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import math
+import uuid
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,6 +27,7 @@ class LanguageDevelopmentResult:
     artifacts: tuple[str, ...] = ()
     diagnostics: tuple[str, ...] = field(default_factory=tuple)
     attempts: int = 0
+    project: str = ""
 
 
 class MultiLanguageCoordinator:
@@ -80,7 +83,14 @@ class MultiLanguageCoordinator:
             return LanguageDevelopmentResult(False, "Se necesita confirmacion")
         if not objective.strip():
             return LanguageDevelopmentResult(False, "Falta el objetivo")
-        lang = Language(language) if isinstance(language, str) else language
+        try:
+            lang = Language(language) if isinstance(language, str) else language
+        except ValueError:
+            return LanguageDevelopmentResult(False, "Lenguaje no soportado: " + str(language),
+                                             str(language), diagnostics=("unsupported_language",))
+        self._staging = self.workspace / ".staging" / (lang.value + "_" + uuid.uuid4().hex)
+        self._last_diagnostic = ""
+
         if on_progress:
             on_progress(10, f"Fase 1: Diseno {lang.value}")
         design = self._design(objective, lang)
@@ -96,16 +106,19 @@ class MultiLanguageCoordinator:
         verified = self._verify_and_repair(implementation, lang, on_progress)
         if verified is None:
             return LanguageDevelopmentResult(False, "No supero verificacion", lang.value,
-                                             attempts=3)
+                                             diagnostics=(self._last_diagnostic,), attempts=2)
         if on_progress:
             on_progress(90, f"Fase 4: Revision {lang.value}")
         review = self._review(verified, objective, design, lang)
-        if review is None:
-            return LanguageDevelopmentResult(False, "Fallo en revision", lang.value)
+        if review is not True:
+            return LanguageDevelopmentResult(False, "Revision no aprobada", lang.value,
+                                             diagnostics=("review_rejected",))
         if on_progress:
             on_progress(100, "Completado")
         return LanguageDevelopmentResult(True, "Mision completada", lang.value,
-                                         tuple(verified.keys()), (), 0)
+                                         tuple(str(p.relative_to(self._staging)) for p in self._staging.rglob("*")
+                                               if p.is_file() and not any(x in p.parts for x in ("build", "target", "__pycache__"))),
+                                         (), 1, str(self._staging))
 
     def _design(self, objective: str, language: Language) -> dict | None:
         prompt = (
@@ -140,34 +153,52 @@ class MultiLanguageCoordinator:
                            ) -> dict | None:
         if language == Language.PYTHON:
             return self._verify_python(implementation, on_progress)
-        staging = self.workspace / ".staging" / language.value
-        staging.mkdir(parents=True, exist_ok=True)
-        self._write_artifacts(staging, implementation, language)
-        ok = self._lightweight_verify(staging, implementation, language)
-        if not ok:
-            if on_progress:
-                on_progress(70, f"Reparando {language.value}")
-            repair = self._repair(implementation, language, "verificacion fallida")
-            if repair:
-                self._write_artifacts(staging, repair, language)
-                ok = self._lightweight_verify(staging, repair, language)
-        return implementation if ok else None
+        current = implementation
+        for attempt in range(2):
+            staging = self._staging / f"attempt_{attempt + 1}"
+            staging.mkdir(parents=True, exist_ok=True)
+            self._write_artifacts(staging, current, language)
+            if self._run_project_tests(staging, language):
+                self._staging = staging
+                return current
+            if attempt == 0:
+                repaired = self._repair(current, language, self._last_diagnostic)
+                if repaired is None:
+                    break
+                current = repaired
+        return None
 
-    @staticmethod
-    def _lightweight_verify(staging: Path, implementation: dict, language: Language) -> bool:
-        mapping = {
-            Language.RUST: ["src/main.rs", "Cargo.toml"],
-            Language.CPP: ["src/main.cpp", "CMakeLists.txt"],
-            Language.JAVA: ["src/main/java/Main.java", "pom.xml"],
-            Language.GDSCRIPT: ["main.gd"],
-            Language.TYPESCRIPT: ["src/main.ts", "package.json"],
-            Language.JAVASCRIPT: ["src/main.js", "package.json"],
-        }
-        expected = mapping.get(language, [])
-        for rel in expected:
-            path = staging / rel
-            if not path.exists() or not path.read_text(encoding="utf-8").strip():
+    def _run_project_tests(self, staging: Path, language: Language) -> bool:
+        from igris_os.security.sandbox import JobObjectSandbox
+        from igris_os.security.restricted import _filtered_env
+        commands = {
+            Language.RUST: [("cargo", "test", "--offline")],
+            Language.CPP: [("cmake", "-S", ".", "-B", "build", "-DFETCHCONTENT_FULLY_DISCONNECTED=ON"),
+                           ("cmake", "--build", "build"),
+                           ("ctest", "--test-dir", "build", "--output-on-failure", "--no-tests=error")],
+            Language.JAVA: [("mvn", "--offline", "-DfailIfNoTests=true", "test")],
+            Language.JAVASCRIPT: [("node", "--test", "src/main.test.js")],
+        }.get(language)
+        if not commands:
+            self._last_diagnostic = "Sin verificador de pruebas para esta ruta; usa la capacidad especifica del lenguaje"
+            return False
+        evidence = []
+        env = _filtered_env()
+        env.update({"CARGO_NET_OFFLINE": "true", "NPM_CONFIG_OFFLINE": "true"})
+        for command in commands:
+            run = JobObjectSandbox().run(list(command), cwd=str(staging), timeout=60, env=env)
+            output = (run.stdout + "\n" + run.stderr)[-16000:]
+            evidence.append({"command": command, "returncode": run.returncode,
+                             "timed_out": run.timed_out, "output": output})
+            self._last_diagnostic = json.dumps(evidence, ensure_ascii=False)
+            (staging / "VERIFICATION.json").write_text(self._last_diagnostic, encoding="utf-8")
+            if run.returncode != 0 or run.timed_out:
                 return False
+        output = evidence[-1]["output"]
+        if language == Language.RUST:
+            return bool(re.search(r"running [1-9][0-9]* tests?", output))
+        if language == Language.JAVASCRIPT:
+            return bool(re.search(r"(?:# |ℹ )pass [1-9][0-9]*", output))
         return True
 
     def _verify_python(self, implementation: dict,
@@ -177,12 +208,17 @@ class MultiLanguageCoordinator:
         tests = str(implementation.get("tests", ""))
         if not source or not tests:
             return None
-        staging = self.workspace / ".staging" / "python"
+        staging = self._staging
         staging.mkdir(parents=True, exist_ok=True)
         workshop = PythonWorkshop(staging, repair_model=self.default_model)
         result: RepairResult = workshop.verify_with_repair(
             source, tests, self.client, max_attempts=3, on_progress=on_progress)
-        return implementation if result.ok else None
+        if not result.ok:
+            self._last_diagnostic = result.message + "; " + "; ".join(result.diagnostics)
+            return None
+        return {**implementation,
+                "source": (staging / "solution.py").read_text(encoding="utf-8"),
+                "tests": (staging / "test_solution.py").read_text(encoding="utf-8")}
 
     def _repair(self, implementation: dict, language: Language, diagnostics: str) -> dict | None:
         system = self.LANGUAGE_PROMPTS.get(language, "")
@@ -215,7 +251,7 @@ class MultiLanguageCoordinator:
         try:
             data = self._extract_json(output.text)
             score = float(data.get("score", 0.0))
-            return bool(data.get("approved", False)) and score >= 0.7
+            return data.get("approved") is True and math.isfinite(score) and 0.7 <= score <= 1.0
         except (ValueError, TypeError, KeyError):
             return None
 

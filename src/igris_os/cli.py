@@ -17,15 +17,20 @@ def _report_progress(percent: int, message: str) -> None:
 
 
 def _detect_language(objective: str) -> str:
-    text = objective.lower()
-    if any(word in text for word in ("python", "script", "api", "cli", "fastapi")):
-        return "python"
-    if any(word in text for word in ("javascript", "react", "node", "frontend", "web")):
-        return "javascript"
-    if any(word in text for word in ("java", "spring", "servlet")):
-        return "java"
-    if any(word in text for word in ("html", "css", "web")):
-        return "web"
+    import re
+    text = objective.casefold()
+    for language, pattern in (
+        ("typescript", r"\b(typescript|tsx)\b"),
+        ("javascript", r"\b(javascript|node|react)\b"),
+        ("rust", r"\brust\b"),
+        ("cpp", r"c\+\+|\bcpp\b"),
+        ("java", r"\b(java|spring|servlet)\b"),
+        ("go", r"\b(golang|go)\b"),
+        ("python", r"\b(python|fastapi)\b"),
+        ("web", r"\b(html|css|web|frontend)\b"),
+    ):
+        if re.search(pattern, text):
+            return language
     return "python"
 
 
@@ -36,59 +41,22 @@ def _run_programming_mission(objective: str, *, approved: bool = False) -> int:
             "message": "La generación ejecuta código y requiere --approve-execution",
         }, ensure_ascii=False, indent=2))
         return 2
-    from pathlib import Path
-
-    from igris_os.ai import OllamaClient
-    from igris_os.programming.coordinator import AutonomousProgrammingCoordinator
-
-    workspace = Path.cwd() / "workspace" / "generated" / "mission"
-    workspace.mkdir(parents=True, exist_ok=True)
-    target_dir = workspace / "output"
-    shutil.rmtree(target_dir, ignore_errors=True)
-
     try:
-        client = OllamaClient()
-        coordinator = AutonomousProgrammingCoordinator(client, workspace)
-        result = coordinator.execute(
-            objective,
-            confirmed=True,
-            language=_detect_language(objective),
-            on_progress=_report_progress,
-        )
+        kernel = build_igris()
+        mission = Mission(objective)
+        capability = "programming.mission"
+        from igris_os.application.programming_intent import is_improvement_request
+        token = kernel.issue_approval(mission.objective, capability)
+        result = kernel.execute(
+            mission, capability,
+            {"objective": objective, "requires_existing": is_improvement_request(objective)},
+            approval=token, on_progress=_report_progress)
     except Exception as exc:
-        print(json.dumps({"ok": False, "message": f"No se pudo arrancar la mision de programacion: {exc}"}, ensure_ascii=False, indent=2))
+        print(json.dumps({"ok": False, "message": str(exc)}, ensure_ascii=False, indent=2))
         return 1
-
-    if not result.ok or result.proposal is None:
-        print(json.dumps({
-            "ok": False,
-            "message": result.message if result else "Fallo en la mision de programacion",
-            "plan": result.plan.plan if result and result.plan else "",
-            "diagnostics": list(result.diagnostics) if result else [],
-        }, ensure_ascii=False, indent=2))
-        return 1
-
-    target_dir.mkdir(parents=True, exist_ok=True)
-    (target_dir / "solution.py").write_text(result.proposal.source, encoding="utf-8")
-    (target_dir / "test_solution.py").write_text(result.proposal.tests, encoding="utf-8")
-    (target_dir / "README.md").write_text(
-        f"# Resultado generado\n\nObjetivo: {objective}\n\n{result.proposal.explanation}\n",
-        encoding="utf-8",
-    )
-
-    print(json.dumps({
-        "ok": True,
-        "message": result.message,
-        "workspace": str(target_dir),
-        "plan": result.plan.plan if result.plan else "",
-        "review": {
-            "approved": bool(result.review.approved) if result.review else False,
-            "score": float(result.review.score) if result.review else 0.0,
-            "issues": list(result.review.issues) if result.review else [],
-        },
-        "files": ["solution.py", "test_solution.py", "README.md"],
-    }, ensure_ascii=False, indent=2))
-    return 0
+    print(json.dumps({"ok": result.ok, "code": result.code, "message": result.message,
+                      **result.data}, ensure_ascii=False, indent=2))
+    return 0 if result.ok else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -96,14 +64,46 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("command", choices=("health", "capabilities", "plan",
                                             "providers", "inventory", "panel",
                                             "probe", "ai", "program", "create",
-                                            "verify", "org"))
+                                            "verify", "org", "work", "work-deliver"))
     parser.add_argument("value", nargs="?")
     parser.add_argument("--source", action="append", default=[])
     parser.add_argument("--output", default="runtime/inventory/sources.json")
     parser.add_argument("--project", type=Path)
     parser.add_argument("--kind", choices=("software", "game"), default="software")
     parser.add_argument("--approve-execution", action="store_true")
+    parser.add_argument("--allow-downloads", action="store_true")
+    parser.add_argument("--report", type=Path)
+    parser.add_argument("--destination", type=Path)
+    parser.add_argument("--answer", action="append", default=[])
+    parser.add_argument("--resume-report", type=Path)
     args = parser.parse_args(argv)
+    if args.command in {'work', 'work-deliver'}:
+        if not args.approve_execution:
+            print(json.dumps({'ok': False, 'code': 'PERMISSION_REQUIRED',
+                'message': 'Este encargo requiere --approve-execution'}, ensure_ascii=False))
+            return 2
+        if args.command == 'work' and not args.value:
+            parser.error('work necesita un encargo')
+        if args.command == 'work-deliver' and not args.report:
+            parser.error('work-deliver necesita --report')
+        objective = args.value or 'Entregar el resultado programado'
+        capability = 'programming.mission' if args.command == 'work' else 'programming.deliver'
+        payload = {'objective': objective, 'root': str(args.project.resolve()) if args.project else '',
+            'report': str(args.report.resolve()) if args.report else '',
+            'resume_report': str(args.resume_report.resolve()) if args.resume_report else '',
+            'destination': str(args.destination.resolve()) if args.destination else '',
+            'clarifications': args.answer, 'allow_downloads': args.allow_downloads,
+            'user_accepted': False}
+        if args.command == 'work':
+            from igris_os.application.programming_intent import is_improvement_request
+            payload['requires_existing'] = is_improvement_request(objective)
+        kernel = build_igris()
+        token = kernel.issue_approval(objective, capability)
+        result = kernel.execute(Mission(objective), capability, payload,
+                                approval=token, on_progress=_report_progress)
+        print(json.dumps({'ok': result.ok, 'code': result.code, 'message': result.message,
+                          **result.data}, ensure_ascii=False, indent=2))
+        return 0 if result.ok else 1
     if args.command == "panel":
         from igris_os.ui import run_panel
         return run_panel()

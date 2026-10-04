@@ -30,4 +30,4 @@ class PythonRepairReviewAdapter:
         )
         return ProjectRepairEvidence(
             root, True, successful, retest.passed,
-            staging.changed_files if successful else (), summary)
+            (), summary, staging.changed_files if successful else ())

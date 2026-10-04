@@ -34,7 +34,26 @@ CREATE_SUSPENDED = 0x00000004
 THREAD_SUSPEND_RESUME = 0x0002
 TH32CS_SNAPTHREAD = 0x00000004
 
-_kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+_kernel32 = ctypes.WinDLL("kernel32", use_last_error=True) if os.name == "nt" else None
+
+if _kernel32 is not None:
+    # ctypes defaults to c_int, which truncates HANDLE values on 64-bit Windows.
+    for _name, _args, _result in (
+        ("CreateJobObjectW", [ctypes.c_void_p, wintypes.LPCWSTR], wintypes.HANDLE),
+        ("SetInformationJobObject", [wintypes.HANDLE, ctypes.c_int,
+                                     ctypes.c_void_p, wintypes.DWORD], wintypes.BOOL),
+        ("AssignProcessToJobObject", [wintypes.HANDLE, wintypes.HANDLE], wintypes.BOOL),
+        ("OpenThread", [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD], wintypes.HANDLE),
+        ("ResumeThread", [wintypes.HANDLE], wintypes.DWORD),
+        ("CreateToolhelp32Snapshot", [wintypes.DWORD, wintypes.DWORD], wintypes.HANDLE),
+        ("Thread32First", [wintypes.HANDLE, ctypes.c_void_p], wintypes.BOOL),
+        ("Thread32Next", [wintypes.HANDLE, ctypes.c_void_p], wintypes.BOOL),
+        ("TerminateJobObject", [wintypes.HANDLE, wintypes.UINT], wintypes.BOOL),
+        ("CloseHandle", [wintypes.HANDLE], wintypes.BOOL),
+    ):
+        _function = getattr(_kernel32, _name)
+        _function.argtypes = _args
+        _function.restype = _result
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +99,8 @@ class JobObjectSandbox:
         if not self._windows:
             return self._plain_run(command, timeout, cwd, env)
         job = self._create_job()
+        if not job:
+            return SandboxRun(-1, "", "No se pudo crear el confinamiento de Windows")
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | CREATE_SUSPENDED
         try:
             process = subprocess.Popen(
@@ -90,9 +111,12 @@ class JobObjectSandbox:
             if job:
                 self._close(job)
             return SandboxRun(-1, "", str(exc))
-        sandboxed = self._assign(job, process) if job else False
-        self._resume(process.pid)
         try:
+            sandboxed = self._assign(job, process)
+            if not sandboxed or not self._resume(process.pid):
+                process.kill()
+                process.communicate(timeout=10)
+                return SandboxRun(-1, "", "No se pudo confinar o reanudar el proceso")
             out, err = process.communicate(timeout=timeout)
             return SandboxRun(process.returncode, out or "", err or "",
                               False, sandboxed)
@@ -106,6 +130,11 @@ class JobObjectSandbox:
                 out, err = "", ""
             return SandboxRun(process.returncode, out or "", err or "",
                               True, sandboxed)
+        except OSError as exc:
+            self._terminate(job)
+            process.kill()
+            process.communicate(timeout=10)
+            return SandboxRun(-1, "", str(exc))
         finally:
             if job:
                 self._close(job)
@@ -120,6 +149,8 @@ class JobObjectSandbox:
                               run.stderr or "")
         except subprocess.TimeoutExpired:
             return SandboxRun(-1, "", "agoto el tiempo", True)
+        except OSError as exc:
+            return SandboxRun(-1, "", str(exc))
 
     def _create_job(self):
         kernel32 = _kernel32
@@ -156,20 +187,23 @@ class JobObjectSandbox:
             wintypes.HANDLE(job), wintypes.HANDLE(process._handle)))
 
     @staticmethod
-    def _resume(pid: int) -> None:
+    def _resume(pid: int) -> bool:
         kernel32 = _kernel32
         tid = JobObjectSandbox._primary_thread_id(kernel32, pid)
         if not tid:
-            return
+            return False
         thread = kernel32.OpenThread(THREAD_SUSPEND_RESUME, False, tid)
-        if thread:
-            kernel32.ResumeThread(thread)
+        if not thread:
+            return False
+        try:
+            return kernel32.ResumeThread(thread) == 1
+        finally:
             kernel32.CloseHandle(wintypes.HANDLE(thread))
 
     @staticmethod
     def _primary_thread_id(kernel32, pid: int) -> int | None:
         snap = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, pid)
-        if snap == -1:
+        if snap is None or snap == ctypes.c_void_p(-1).value:
             return None
         try:
             entry = THREADENTRY32()

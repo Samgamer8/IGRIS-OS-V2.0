@@ -2,11 +2,8 @@ from igris_os.application import CapabilityRegistry, LLMMissionDirector
 from igris_os.domain import ActionRisk, CapabilitySpec, ExecutionResult, Mission
 from igris_os.tools import ToolCatalog
 
-from igris_os.capabilities.k3_engine import register_k3_capabilities
-
 
 def register_core_capabilities(registry: CapabilityRegistry) -> None:
-    register_k3_capabilities(registry)
     registry.register(
         CapabilitySpec("mission.plan", "Plan verificable de una mision",
                        ActionRisk.READ_ONLY),
@@ -24,11 +21,11 @@ def register_core_capabilities(registry: CapabilityRegistry) -> None:
         CapabilitySpec("system.capabilities", "Catalogo real de capacidades",
                        ActionRisk.READ_ONLY),
         lambda _: ExecutionResult.success(
-            "Sí. IGRIS OS puede crear programas y juegos completos. "
-            "Una orden concreta inicia un flujo real: define el proyecto, "
-            "solicita permiso antes de escribir o ejecutar, construye en un "
-            "workspace aislado, ejecuta pruebas y entrega archivos verificables. "
-            "Indica ahora qué quieres construir y dónde deseas recibirlo.",
+            "Puedo inspeccionar archivos y herramientas locales e intentar generar proyectos. "
+            "La generación necesita un modelo que responda y las herramientas de la tarea. "
+            "Este catálogo describe funciones registradas; no confirma que estén disponibles "
+            "en tu equipo ni garantiza un juego completo. Cada entrega debe indicar qué "
+            "se ha comprobado y qué queda pendiente.",
             capabilities=[{"name": spec.name,
                            "description": spec.description,
                            "risk": spec.risk.value}

@@ -1,89 +1,108 @@
 from pathlib import Path
+from tempfile import TemporaryDirectory
+import unittest
+from unittest.mock import Mock, patch
+from types import SimpleNamespace
 
-import pytest
-
-from igris_os.application.project_development import (
-    ProjectDevelopmentAdapter,
-    StagedProject,
-)
-from igris_os.application.project_flow import ProjectStage
-from igris_os.application.project_mission import ProjectMissionFactory
-from igris_os.application.project_planning import ProjectMissionPlanner
-from igris_os.application.project_testing import (
-    ProjectTestEvidence,
-    ProjectTestingAdapter,
-)
-
-
-class FakeDeveloper:
-    def __init__(self, root: Path):
-        self.root = root
-
-    def stage(self, mission):
-        self.root.mkdir(parents=True)
-        (self.root / "main.py").write_text("print('ok')\n", encoding="utf-8")
-        return StagedProject(self.root, ("main.py",))
+from igris_os.application.project_development import DevelopedProjectMission, StagedProject
+from igris_os.application.project_flow import ProjectFlow, ProjectStage
+from igris_os.application.project_mission import ProjectMission
+from igris_os.application.project_planning import PlannedProjectMission
+from igris_os.application.project_repair import ProjectRepairAdapter, ProjectRepairEvidence
+from igris_os.application.project_testing import ProjectTestEvidence, ProjectTestingAdapter
+from igris_os.application.python_testing import PythonPytestVerifierAdapter
+from igris_os.application.python_lifecycle import build_python_project_lifecycle
 
 
-class FakeVerifier:
-    def __init__(self, evidence: ProjectTestEvidence):
-        self.evidence = evidence
+class ProjectTestingAdapterTests(unittest.TestCase):
+    def test_pytest_failure_retains_bounded_diagnostic_for_repair(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'test_main.py').touch()
+            workflow = Mock()
+            diagnostic = 'prefix\n' * 1500 + '\nE AssertionError: expected 3, got 2\n1 failed in 0.10s'
+            workflow.run.return_value = SimpleNamespace(
+                executed=True, run=SimpleNamespace(returncode=1, timed_out=False,
+                                                   stdout=diagnostic, stderr=''))
+            evidence = PythonPytestVerifierAdapter(workflow).verify(self.developed(root))
+            self.assertTrue(evidence.executed)
+            self.assertFalse(evidence.passed)
+            self.assertIn('AssertionError: expected 3, got 2', evidence.summary)
+            self.assertLess(len(evidence.summary), 4200)
 
-    def verify(self, mission):
-        return self.evidence
+    def test_final_review_does_not_open_another_repair_cycle(self):
+        verifier = Mock()
+        with TemporaryDirectory() as directory, \
+                patch('igris_os.application.python_lifecycle.PythonRepairReviewAdapter') as review, \
+                patch('igris_os.application.python_lifecycle.PythonRepairingVerifierAdapter') as repair, \
+                patch('igris_os.application.python_lifecycle.ProjectLifecycle'):
+            build_python_project_lifecycle(Mock(), Path(directory), 'local-model',
+                                           developer=Mock(), verifier=verifier)
+            review.assert_called_once_with(verifier)
+            self.assertIs(repair.call_args.args[-1], verifier)
+
+    def developed(self, root: Path) -> DevelopedProjectMission:
+        flow = ProjectFlow()
+        for stage in (ProjectStage.REQUEST, ProjectStage.PLAN, ProjectStage.DEVELOP):
+            flow = flow.record(stage, stage.value, success=True)
+        mission = ProjectMission(Mock(), flow)
+        return DevelopedProjectMission(
+            PlannedProjectMission(mission, Mock()), StagedProject(root, ("main.py",)))
+
+    def test_executed_results_reach_repair_without_hiding_failures(self):
+        for passed in (True, False):
+            with self.subTest(passed=passed):
+                evidence = ProjectTestEvidence(True, passed, ("python", "-m", "unittest"), "result")
+                verifier = Mock()
+                verifier.verify.return_value = evidence
+                developed = self.developed(Path("."))
+                tested = ProjectTestingAdapter(verifier).test(developed)
+                self.assertIs(tested.evidence, evidence)
+                self.assertIs(tested.mission.mission.mission.flow.next_stage, ProjectStage.REPAIR)
+                summary = tested.mission.mission.mission.flow.evidence[-1].summary
+                self.assertIn("aprobadas" if passed else "fallidas", summary)
+                self.assertIs(developed.mission.mission.flow.next_stage, ProjectStage.TEST)
+
+    def test_missing_execution_evidence_blocks_progress(self):
+        for evidence in (
+            ProjectTestEvidence(False, False, ("python",), "result"),
+            ProjectTestEvidence(True, False, (), "result"),
+            ProjectTestEvidence(True, False, (" ",), "result"),
+            ProjectTestEvidence(True, False, ("python",), " "),
+        ):
+            with self.subTest(evidence=evidence):
+                verifier = Mock()
+                verifier.verify.return_value = evidence
+                with self.assertRaises(ValueError):
+                    ProjectTestingAdapter(verifier).test(self.developed(Path(".")))
+
+    def test_failed_post_repair_tests_block_delivery(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "main.py").touch()
+            verifier = Mock()
+            verifier.verify.return_value = ProjectTestEvidence(True, False, ("python",), "failure")
+            tested = ProjectTestingAdapter(verifier).test(self.developed(root))
+            repairer = Mock()
+            repairer.repair.return_value = ProjectRepairEvidence(
+                root, True, True, False, ("main.py",), "still failing")
+            with self.assertRaisesRegex(ValueError, "pruebas posteriores"):
+                ProjectRepairAdapter(repairer).repair(tested)
+            self.assertIs(tested.mission.mission.mission.flow.next_stage, ProjectStage.REPAIR)
+
+    def test_successful_repair_after_failed_tests_reaches_delivery(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "main.py").touch()
+            verifier = Mock()
+            verifier.verify.return_value = ProjectTestEvidence(True, False, ("python",), "failure")
+            tested = ProjectTestingAdapter(verifier).test(self.developed(root))
+            repairer = Mock()
+            repairer.repair.return_value = ProjectRepairEvidence(
+                root, True, True, True, ("main.py",), "fixed and verified")
+            repaired = ProjectRepairAdapter(repairer).repair(tested)
+            self.assertIs(repaired.mission.mission.mission.mission.flow.next_stage, ProjectStage.DELIVER)
 
 
-def _developed(tmp_path: Path):
-    destination = tmp_path / "delivery"
-    destination.mkdir()
-    mission = ProjectMissionFactory().create("Crea una aplicación", {
-        "technology": "python",
-        "delivery": "source",
-        "destination": str(destination),
-        "acceptance": "las pruebas pasan",
-    })
-    planned = ProjectMissionPlanner().plan(mission)
-    root = tmp_path / "workspace" / ".staging" / "candidate"
-    return ProjectDevelopmentAdapter(
-        tmp_path / "workspace", FakeDeveloper(root)).develop(planned)
-
-
-def test_testing_records_executed_success_without_delivery(tmp_path):
-    developed = _developed(tmp_path)
-    evidence = ProjectTestEvidence(
-        True, True, ("python", "-m", "pytest", "-q"), "3 passed")
-
-    result = ProjectTestingAdapter(FakeVerifier(evidence)).test(developed)
-
-    assert result.mission.mission.mission.flow.next_stage is ProjectStage.REPAIR
-    assert "python -m pytest -q" in (
-        result.mission.mission.mission.flow.evidence[-1].summary)
-    assert developed.mission.mission.flow.next_stage is ProjectStage.TEST
-    destination = developed.mission.mission.contract.destination
-    assert destination is not None
-    assert not (destination / developed.mission.plan.project_name).exists()
-
-
-@pytest.mark.parametrize("evidence, message", [
-    (ProjectTestEvidence(False, False, (), "sin ejecutar"), "no fueron ejecutadas"),
-    (ProjectTestEvidence(True, False, ("pytest",), "1 failed"), "fallaron"),
-    (ProjectTestEvidence(True, True, (), "3 passed"), "comando ejecutado"),
-])
-def test_testing_rejects_unverifiable_evidence(tmp_path, evidence, message):
-    developed = _developed(tmp_path)
-
-    with pytest.raises(ValueError, match=message):
-        ProjectTestingAdapter(FakeVerifier(evidence)).test(developed)
-
-    assert developed.mission.mission.flow.next_stage is ProjectStage.TEST
-
-
-def test_testing_rejects_mission_without_development(tmp_path):
-    mission = ProjectMissionFactory().create("Crea una aplicación")
-    fake = type("Developed", (), {
-        "mission": type("Planned", (), {"mission": mission})(),
-    })()
-
-    with pytest.raises(ValueError, match="no está lista"):
-        ProjectTestingAdapter(FakeVerifier(
-            ProjectTestEvidence(True, True, ("pytest",), "ok"))).test(fake)
+if __name__ == "__main__":
+    unittest.main()

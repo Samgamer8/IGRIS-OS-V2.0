@@ -47,4 +47,31 @@ class PythonPytestVerifierAdapter:
         summary = re.sub(r"\bFAILED\b", "failed", summary, flags=re.IGNORECASE)
         if result.run.timed_out:
             summary = "pytest agotó el tiempo permitido"
+        if not passed and output:
+            summary += '\nDiagnostico de la ejecucion:\n' + output[-4000:]
         return ProjectTestEvidence(True, passed, self.COMMAND, summary)
+
+
+class PythonRepairingVerifierAdapter:
+    """Repara un staging con fallos y exige una nueva ejecución de sus pruebas."""
+
+    def __init__(self, client, workspace, model: str, verifier=None) -> None:
+        from igris_os.programming.repository_developer import RepositoryDeveloper
+        self.verifier = verifier or PythonPytestVerifierAdapter()
+        self.developer = RepositoryDeveloper(client, workspace, model)
+
+    def verify(self, mission: DevelopedProjectMission) -> ProjectTestEvidence:
+        first = self.verifier.verify(mission)
+        if not first.executed or first.passed:
+            return first
+        result = self.developer.repair_until_verified(
+            mission.staging.root, mission.mission.mission.contract.objective,
+            first.summary, max_attempts=3)
+        if not result.ok:
+            return ProjectTestEvidence(
+                first.executed, False, first.command,
+                first.summary + "; " + result.message)
+        checked = self.verifier.verify(mission)
+        return ProjectTestEvidence(
+            checked.executed, checked.passed, checked.command,
+            f"Reparacion comprobada ({result.attempts} intentos): {checked.summary}")

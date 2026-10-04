@@ -29,7 +29,7 @@ class TestedProjectMission:
 
 
 class ProjectTestingAdapter:
-    """Registra pruebas aprobadas sin reparar ni entregar artefactos."""
+    """Registra pruebas ejecutadas para permitir reparar los fallos detectados."""
 
     def __init__(self, verifier: ProjectStagingVerifier) -> None:
         self.verifier = verifier
@@ -45,10 +45,9 @@ class ProjectTestingAdapter:
             raise ValueError("La evidencia no identifica el comando ejecutado")
         if not evidence.summary.strip():
             raise ValueError("La evidencia de pruebas está vacía")
-        if not evidence.passed:
-            raise ValueError("Las pruebas fallaron: " + evidence.summary)
         command = " ".join(evidence.command)
-        summary = f"Pruebas aprobadas con `{command}`: {evidence.summary}"
+        result = "aprobadas" if evidence.passed else "fallidas"
+        summary = f"Pruebas {result} con `{command}`: {evidence.summary}"
         tested_mission = replace(
             project_mission,
             flow=project_mission.flow.record(

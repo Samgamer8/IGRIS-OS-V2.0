@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 
 from igris_os.ai import OllamaClient
+from igris_os.ai.model_selection import coding_model_candidates
 from igris_os.application.node_staging_final import FinalNodeStagingDeveloper
 from igris_os.application.project_mission import ProjectMissionFactory
 from igris_os.application.project_planning import ProjectMissionPlanner
@@ -21,6 +22,20 @@ def _develop_node(payload):
         return ExecutionResult.failure(
             "Tecnologia Node no soportada", "NODE_TECHNOLOGY_UNSUPPORTED")
     workspace = Path(payload["workspace"]).resolve()
+    client = OllamaClient(timeout=float(payload.get("timeout", 240)))
+    installed = tuple(client.models())
+    requested = str(payload.get("model", "")).strip()
+    try:
+        candidates = coding_model_candidates(installed, requested)
+    except ValueError as exc:
+        return ExecutionResult.failure(
+            str(exc), "PROGRAMMING_MODEL_UNAVAILABLE")
+    if not candidates:
+        return ExecutionResult.failure(
+            "No hay modelos de programacion locales utilizables. "
+            "Modelos anunciados: " + (", ".join(installed) or "ninguno"),
+            "PROGRAMMING_MODEL_UNAVAILABLE")
+    model = candidates[0]
     answers = {
         "technology": technology,
         "delivery": "source_and_web" if technology == "web" else "source",
@@ -34,8 +49,7 @@ def _develop_node(payload):
             str(payload.get("objective", "")), answers)
         planned = ProjectMissionPlanner().plan(mission)
         staging = FinalNodeStagingDeveloper(
-            OllamaClient(timeout=float(payload.get("timeout", 240))),
-            workspace, str(payload.get("model", "qwen2.5-coder:7b")),
+            client, workspace, model,
         ).stage(planned)
     except (ValueError, OSError, subprocess.SubprocessError) as exc:
         return ExecutionResult.failure(str(exc), "NODE_DEVELOPMENT_FAILED")
@@ -56,6 +70,7 @@ def _develop_node(payload):
         "Proyecto Node compilado y probado",
         technology=technology, staged_project=str(staging.root),
         changed_files=staging.changed_files, delivered_project=delivered,
+        selected_model=model, fallback_models=list(candidates[1:]),
         verified=True,
     )
 

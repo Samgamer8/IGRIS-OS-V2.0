@@ -81,6 +81,9 @@ class LLMMissionDirector:
         prompt = (
             self.SYSTEM_PROMPT +
             "\n\nOBJETIVO:\n" + mission.objective +
+            "\n\nRegla de Oro: Si el objetivo es claro, NO pidas aclaraciones. "
+            "Asume la configuración profesional estándar (GDScript para Godot, GUI para Apps, etc.). "
+            "Devuelve el contrato JSON directamente." +
             "\n\nGenera contrato JSON."
         )
         reply: ModelReply = self.client.generate(prompt, self.fallback_model)
@@ -136,4 +139,4 @@ class LLMMissionDirector:
         )
 
 
-MissionDirector = LLMMissionDirector
+MissionDirector = LLMMissionDirector

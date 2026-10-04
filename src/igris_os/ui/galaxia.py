@@ -17,6 +17,8 @@ import logging
 import math
 import random
 import time
+import sys
+from pathlib import Path
 
 from PyQt6.QtCore import QPointF, Qt, QTimer, pyqtSignal
 
@@ -70,6 +72,9 @@ class GalaxiaWidget(QWidget):
         self._busy = False
         self._flash = 0.0
         self._rot = 0.0
+        self._orbit_motion = True
+        self._layered_presentation = False
+        self._layered_renderer = None
         self.ia_activity = 0.0
         self._activity_target = 0.0
         self._active = None
@@ -163,6 +168,23 @@ class GalaxiaWidget(QWidget):
             self._activity_target = min(1.0, self._activity_target + 0.65)
             self._resume()
         self._mark_dirty()
+
+    def set_orbit_motion(self, enabled: bool) -> None:
+        self._orbit_motion = bool(enabled)
+        if not enabled:
+            self._rot = 0.0
+        self._resume()
+        self._mark_dirty()
+
+    def set_layered_presentation(self, enabled: bool) -> None:
+        if enabled and self._layered_renderer is None:
+            from igris_os.ui.neural_layers import NeuralLayers
+            root = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parents[3]))
+            self._layered_renderer = NeuralLayers(root / 'assets/igris_neural_layers.jpg')
+        self._layered_presentation = bool(enabled)
+        self._resume()
+        self._mark_dirty()
+        self.update()
 
     def _resume(self) -> None:
         """Reanuda la animación (tras reposo o al iniciar actividad)."""
@@ -369,10 +391,12 @@ class GalaxiaWidget(QWidget):
                 nd["born"] = min(1.0, nd["born"] + dt * 1.2)
 
         vel = 0.14 + 0.62 * self.ia_activity
-        self._rot += vel * dt
+        if self._orbit_motion:
+            self._rot += vel * dt
 
         for ring in self._rings:
-            ring["phase"] += ring["speed"] * dt * (0.5 + 1.5 * self.ia_activity)
+            if self._orbit_motion:
+                ring["phase"] += ring["speed"] * dt * (0.5 + 1.5 * self.ia_activity)
 
         for nd in self._nodes:
             ring = self._rings[nd["ring"]]
@@ -505,6 +529,26 @@ class GalaxiaWidget(QWidget):
         cx, cy = w / 2.0, h / 2.0
         R = min(w, h) * 0.415
         f = 2.6
+
+        if self._layered_presentation:
+            from PyQt6.QtCore import QRectF
+            painter.fillRect(self.rect(), QColor('#060910'))
+            self._layered_renderer.draw(painter, QRectF(self.rect()), self._t, self.ia_activity)
+            for index, node in enumerate(self._nodes):
+                pos_x, pos_y, _depth, _distance = self._project(node['p'], cx, cy, f, R)
+                state = self.state_of(node['name'])
+                color = QColor(*(ESTADO_COLOR[state] if state != 'pending' else (65, 185, 210)))
+                color.setAlpha(80 if state == 'pending' else 230)
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(color)
+                radius = 2 if state == 'pending' else 4
+                painter.drawEllipse(QPointF(pos_x, pos_y), radius, radius)
+                if state != 'pending' or index == self._hover:
+                    painter.setPen(color)
+                    painter.setFont(QFont('Consolas', 8))
+                    painter.drawText(QPointF(pos_x + 6, pos_y + 12), node['name'])
+            painter.end()
+            return
 
         act = self.ia_activity
         glitch = 0.9 + 0.1 * math.sin(self._t * 2.3)

@@ -10,6 +10,7 @@ htmlcov/
 
 # --- Entornos ---
 .venv/
+.venv-voice/
 venv/
 env/
 
@@ -32,6 +33,10 @@ build/
 dist/
 build_portable/
 *.spec.bak
+node_modules/
+test-results/
+evidence/
+playwright-report/
 
 # --- Modelos y binarios pesados ---
 *.gguf
@@ -46,3 +51,7 @@ desktop.ini
 .vscode/
 .idea/
 .aider*
+.continue/
+.freebuff/
+.kilo/
+.playwright-mcp/

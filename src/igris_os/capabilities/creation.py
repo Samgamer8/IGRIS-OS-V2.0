@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 
 from igris_os.ai import OllamaClient
+from igris_os.ai.model_selection import coding_model_candidates
 from igris_os.application import (CapabilityRegistry, ProjectIntake,
                                   ProjectOffice, SalesOffice,
                                   SpecialistCoordinator)
@@ -18,7 +19,8 @@ from igris_os.evaluation import (IndependentVerifier, approved_models, is_model_
 from igris_os.games import (
     GodotExporter, GodotGameDeveloper, GodotProjectFactory, GameVerifier,
 )
-from igris_os.files import RepositoryAnalyzer, RepositoryStager
+from igris_os.files import (RepositoryAnalyzer, RepositoryChangeApplier,
+                            RepositoryStager)
 from igris_os.multimedia import (ImageEngine, MediaEngine, MediaPipeline,
                                  VisualVerifier)
 from igris_os.programming import (
@@ -30,6 +32,16 @@ from igris_os.programming import (
 
 
 def register_creation_capabilities(registry: CapabilityRegistry) -> None:
+    from igris_os.capabilities.neural_image import register_neural_image
+    register_neural_image(registry)
+    from igris_os.capabilities.programming_mission import register_programming_mission
+    register_programming_mission(registry)
+    registry.register(
+        CapabilitySpec("games.godot.templates.find", "Busca plantillas Godot compatibles en carpetas locales",
+                       ActionRisk.READ_ONLY, timeout_seconds=60), _find_godot_templates)
+    registry.register(
+        CapabilitySpec("games.godot.templates.install", "Descarga y verifica las plantillas oficiales de Godot",
+                       ActionRisk.EXTERNAL, True, timeout_seconds=1200), _install_godot_templates)
     registry.register(
         CapabilitySpec("programming.preflight",
                        "Inspeccion tecnica de solo lectura con evidencia",
@@ -85,8 +97,8 @@ def register_creation_capabilities(registry: CapabilityRegistry) -> None:
                        ActionRisk.READ_ONLY), _sales_plan)
     registry.register(
         CapabilitySpec("programming.autonomous.develop",
-                       "Flujo experimental de generación con revisión y pruebas",
-                       ActionRisk.WRITE_WORKSPACE, True), _develop_autonomous)
+                       "Desarrolla proyectos multiarchivo y exige pruebas antes de entregar",
+                       ActionRisk.WRITE_WORKSPACE, True, timeout_seconds=900), _develop_autonomous)
     registry.register(
         CapabilitySpec("programming.multilang.develop",
                        "Flujo experimental multilenguaje; entrega solo con verificación",
@@ -94,7 +106,10 @@ def register_creation_capabilities(registry: CapabilityRegistry) -> None:
     registry.register(
         CapabilitySpec("games.godot.scaffold",
                        "Crea una base de proyecto Godot",
-                       ActionRisk.WRITE_WORKSPACE, True), _godot)
+                       ActionRisk.WRITE_WORKSPACE, True, timeout_seconds=3600), _godot)
+    registry.register(
+        CapabilitySpec("games.godot.resume", "Reanuda archivos Godot existentes con presupuesto y respaldo",
+                       ActionRisk.EXTERNAL, True, timeout_seconds=3600), _resume_godot)
     registry.register(
         CapabilitySpec("games.godot.playtest",
                        "Arranca un juego Godot y verifica que renderiza",
@@ -130,6 +145,10 @@ def register_creation_capabilities(registry: CapabilityRegistry) -> None:
         CapabilitySpec("repository.repair",
                        "Repara un staging y acepta solo tests aprobados",
                        ActionRisk.WRITE_WORKSPACE, True), _repository_repair)
+    registry.register(
+        CapabilitySpec("repository.apply_verified",
+                       "Aplica cambios verificados al original con respaldo y rollback",
+                       ActionRisk.EXTERNAL, True), _repository_apply_verified)
     registry.register(
         CapabilitySpec("mission.coordinate",
                        "Coordina especialistas con revision cruzada",
@@ -277,8 +296,11 @@ def _languages(_):
 
 def _develop_python(payload):
     objective = str(payload.get("objective", "")).strip()
-    model = str(payload.get("model", "qwen2.5-coder:7b"))
     client = OllamaClient(timeout=float(payload.get("timeout", 180)))
+    try:
+        model, _fallbacks = _installed_programming_models(client, payload)
+    except ValueError as exc:
+        return ExecutionResult.failure(str(exc), "PROGRAMMING_MODEL_UNAVAILABLE")
     result = PythonProjectDeveloper(
         client, Path(payload["workspace"]), model).develop(
             objective, confirmed=True,
@@ -334,6 +356,8 @@ def _develop_python_multifile(payload):
     from igris_os.programming import PythonMultiFileDeveloper
 
     objective = str(payload.get("objective", "")).strip()
+    if not objective:
+        return ExecutionResult.failure("Falta el objetivo", "OBJECTIVE_REQUIRED")
     if "optimiz" in objective.casefold():
         objective += (
             " Usa datos reales del equipo mediante psutil si esta disponible y "
@@ -342,7 +366,6 @@ def _develop_python_multifile(payload):
             "solo puede mover temporales propios a un backup para rollback, debe "
             "registrar JSON y exigir confirmacion. Incluye pruebas de estas propiedades."
         )
-    model = str(payload.get("model", "qwen2.5-coder:7b"))
     workspace = Path(payload["workspace"])
     domain_validator = None
     if "optimiz" in objective.casefold():
@@ -352,21 +375,24 @@ def _develop_python_multifile(payload):
                 return ""
             return json.dumps(diagnostics, ensure_ascii=False)
     client = OllamaClient(timeout=float(payload.get("timeout", 300)))
-    available_models = set(client.models())
+    try:
+        model, automatic_fallbacks = _installed_programming_models(
+            client, payload)
+    except ValueError as exc:
+        return ExecutionResult.failure(
+            str(exc), "PROGRAMMING_MODEL_UNAVAILABLE",
+            data={"models_tried": []})
     requested_fallbacks = payload.get("fallback_models")
     if isinstance(requested_fallbacks, (list, tuple)):
-        candidates = tuple(str(item) for item in requested_fallbacks)
+        requested = tuple(str(item) for item in requested_fallbacks)
+        fallback_models = tuple(
+            candidate for candidate in automatic_fallbacks
+            if candidate in requested)
     else:
-        candidates = (
-            "deepseek-coder-v2:16b", "devstral:24b",
-            "qwen2.5-coder:7b", "stable-code:3b-code-q4_0",
-        )
-    fallback_models = tuple(
-        candidate for candidate in candidates
-        if candidate != model and candidate in available_models
-    )
+        fallback_models = automatic_fallbacks
     result = PythonMultiFileDeveloper(client, workspace, model).develop(
-        objective, confirmed=True, attempts=3, componentized=True,
+        objective, confirmed=True, attempts=min(5, max(1, int(payload.get("attempts", 3)))),
+        componentized=bool(payload.get("componentized", False)),
         domain_validator=domain_validator,
         fallback_models=fallback_models,
     )
@@ -374,29 +400,48 @@ def _develop_python_multifile(payload):
         return ExecutionResult.failure(
             result.message, "DEVELOPMENT_FAILED",
             data={"diagnostics": list(result.diagnostics),
-                  "models_tried": list(getattr(result, 'models_tried', []))},
+                  "models_tried": list(getattr(result, 'models_tried', [])),
+                  "selected_model": model,
+                  "fallback_models": list(fallback_models)},
         )
-    destination = Path(str(payload.get("delivery_root", ""))).resolve()
-    if not destination.is_dir():
-        return ExecutionResult.failure("La carpeta de entrega no existe", "DELIVERY_PATH_INVALID")
-    target = destination / str(payload.get("delivery_name", "programa"))
-    if target.exists():
-        return ExecutionResult.failure("Ya existe una entrega con ese nombre", "DELIVERY_PATH_EXISTS")
-    shutil.copytree(result.project, target)
-    if "optimiz" in objective.casefold() and not _validate_pc_optimizer(target):
-        diagnostics = _pc_optimizer_diagnostics(target)
-        shutil.rmtree(target)
-        return ExecutionResult.failure(
-            "La entrega no demuestra diagnostico real ni acciones seguras verificables",
-            "DELIVERY_DOMAIN_VALIDATION_FAILED",
-            data=diagnostics,
-        )
+    # No implicit delivery to cwd; the verified staging is a usable result.
+    target = result.project
+    destination_text = str(payload.get("delivery_root", "")).strip()
+    if destination_text:
+        destination = Path(destination_text).expanduser().resolve()
+        if not destination.is_dir():
+            return ExecutionResult.failure("La carpeta de entrega no existe", "DELIVERY_PATH_INVALID")
+        name = str(payload.get("delivery_name", result.project.name)).strip()
+        if (not name or name in {".", ".."} or any(c in name for c in '/\\:')
+                or name.endswith((".", " "))):
+            return ExecutionResult.failure("Nombre de entrega invalido", "DELIVERY_PATH_INVALID")
+        target = (destination / name).resolve()
+        if target.parent != destination:
+            return ExecutionResult.failure("Entrega fuera del destino autorizado", "DELIVERY_PATH_INVALID")
+        if target.exists():
+            return ExecutionResult.failure("Ya existe una entrega con ese nombre", "DELIVERY_PATH_EXISTS")
+        shutil.copytree(result.project, target)
     return ExecutionResult.success(
         "Proyecto Python multiarchivo generado y verificado",
         project=str(target), staged_project=str(result.project),
-        generated_files=list(result.files), attempts=3,
-        models_tried=list(getattr(result, 'models_tried', [])),
+        generated_files=list(result.files), attempts=getattr(result, "attempts", 0),
+        models_tried=list(getattr(result, "models_tried", [])),
+        selected_model=model, fallback_models=list(fallback_models),
+        verified=True,
     )
+
+
+def _installed_programming_models(client, payload) -> tuple[str, tuple[str, ...]]:
+    """Elige únicamente modelos anunciados por los backends conectados."""
+
+    installed = tuple(client.models())
+    requested = str(payload.get("model", "")).strip()
+    candidates = coding_model_candidates(installed, requested)
+    if not candidates:
+        raise ValueError(
+            "No hay modelos de programacion locales utilizables. "
+            "Modelos anunciados: " + (", ".join(installed) or "ninguno"))
+    return candidates[0], candidates[1:]
 
 
 def _validate_pc_optimizer(project: Path) -> bool:
@@ -557,25 +602,13 @@ def _sales_plan(payload):
 
 
 def _develop_autonomous(payload):
-    objective = str(payload.get("objective", "")).strip()
-    language = str(payload.get("language", "python")).strip()
-    model = str(payload.get("model", "qwen2.5-coder:7b"))
-    client = OllamaClient(timeout=float(payload.get("timeout", 120)))
-    coordinator = AutonomousProgrammingCoordinator(
-        client, Path(payload["workspace"]), default_model=model)
-    result = coordinator.execute(
-        objective, confirmed=True,
-        on_progress=payload.get("on_progress"))
-    if not result.ok:
-        return ExecutionResult.failure(result.message, "AUTONOMOUS_FAILED")
-    return ExecutionResult.success(
-        result.message,
-        plan=result.plan.plan if result.plan else "",
-        deliverables=result.plan.modules if result.plan else (),
-        acceptance_criteria=result.plan.acceptance if result.plan else (),
-        review_score=result.review.score if result.review else 0.0,
-        attempts=result.attempts,
-    )
+    """Ruta principal: repositorio existente o proyecto multiarchivo verificable."""
+    if str(payload.get("root", "")).strip():
+        return _repository_develop(payload)
+    language = str(payload.get("language", "python")).strip().casefold()
+    if language != "python":
+        return _develop_multilang(payload)
+    return _develop_python_multifile(payload)
 
 
 def _as_tuple(value) -> tuple[str, ...]:
@@ -664,8 +697,15 @@ def _verify_delivery(payload):
 def _develop_multilang(payload):
     objective = str(payload.get("objective", "")).strip()
     language = str(payload.get("language", "")).strip()
-    model = str(payload.get("model", "qwen2.5-coder:7b"))
+    if language.casefold() in {"javascript", "typescript", "web"}:
+        from igris_os.production_bootstrap_release import _develop_node
+        return _develop_node({**payload, "technology": language.casefold()})
+
     client = OllamaClient(timeout=float(payload.get("timeout", 120)))
+    try:
+        model, _fallbacks = _installed_programming_models(client, payload)
+    except ValueError as exc:
+        return ExecutionResult.failure(str(exc), "PROGRAMMING_MODEL_UNAVAILABLE")
     result = MultiLanguageCoordinator(
         client, Path(payload["workspace"]), default_model=model).develop(
             objective, language=language, confirmed=True,
@@ -676,53 +716,213 @@ def _develop_multilang(payload):
             data={"diagnostics": list(result.diagnostics),
                   "models_tried": list(getattr(result, 'models_tried', []))},
         )
-    return ExecutionResult.success(result.message, language=language)
+    return ExecutionResult.success(result.message, language=language, project=result.project,
+                                   generated_files=list(result.artifacts), verified=True)
+
+
+def _find_godot_templates(payload):
+    root = Path(payload["root"]).expanduser() if payload.get("root") else Path(__file__).resolve().parents[3]
+    status = GodotExporter(search_root=root).template_status()
+    lines = list(status["diagnostics"])
+    if status["truncated"]:
+        lines.append("Se alcanzo el limite de busqueda; indica una carpeta mas concreta.")
+    status["diagnostics"] = lines
+    return ExecutionResult.success(
+        "Busqueda local terminada: plantillas compatibles encontradas" if status["ready"]
+        else "Busqueda local terminada: no se encontraron plantillas compatibles. "
+             "Puedes escribir: instala las plantillas de Godot.", template_search=status)
+
+
+def _install_godot_templates(payload):
+    from igris_os.games.template_install import install_templates
+    from igris_os.games.runtime import GodotRuntime
+    root = Path(payload["root"]).expanduser() if payload.get("root") else Path(__file__).resolve().parents[3]
+    try:
+        result = install_templates(GodotRuntime(), root, on_progress=payload.get("on_progress"))
+        return ExecutionResult.success("Plantillas compatibles preparadas para IGRIS", **result)
+    except (OSError, ValueError) as exc:
+        return ExecutionResult(ok=False, code="GODOT_TEMPLATES_INSTALL_FAILED",
+                               message="No se pudieron instalar las plantillas",
+                               data={"diagnostics": [str(exc)]})
+
+
+def _resume_godot(payload):
+    if not payload.get("resume_project"):
+        from igris_os.application.game_resume import resolve_game_resume, matching_game_jobs
+        from igris_os.application.mission_queue import QueuedMission
+        runtime = Path(payload["workspace"]).parent.parent
+        try:
+            rows = json.loads((runtime / "missions_queue.json").read_text(encoding="utf-8"))
+            jobs = [QueuedMission(**row) for row in rows if isinstance(row, dict) and not row.get("payload", {}).get("request")]
+        except (OSError, TypeError, ValueError):
+            jobs = []
+        objective = str(payload.get("request") or payload.get("objective", ""))
+        matches = matching_game_jobs(objective, jobs)
+        try:
+            _, recovered = resolve_game_resume(objective, matches[-1] if matches else None, runtime)
+        except (OSError, ValueError) as exc:
+            return ExecutionResult.failure(str(exc), "GAME_RESUME_NOT_FOUND")
+        payload = {**payload, **recovered}
+    return _godot({**payload, "resume": True, "generate_full_code": True})
 
 
 def _godot(payload):
     name = str(payload.get("name", "Juego IGRIS"))
     workspace = Path(payload["workspace"])
+    resumed = bool(payload.get("resume"))
+    resume_source = Path(str(payload.get("resume_project", ""))).expanduser().resolve() if resumed else None
+    if resumed and (not payload.get("resume_project") or not (resume_source / "project.godot").is_file()):
+        return ExecutionResult.failure("Falta la carpeta del proyecto existente; no se inicia otro", "GAME_RESUME_NOT_FOUND")
+    expected_delivery = None
+    resume_destination = None
+    if resumed:
+        from igris_os.games.resume_files import snapshot
+        destination = payload.get("resume_destination")
+        if destination:
+            resume_destination = Path(destination).expanduser().resolve()
+        elif payload.get("delivery_root"):
+            delivery_root = Path(payload["delivery_root"]).expanduser().resolve()
+            resume_destination = delivery_root / name
+            legacy_destination = delivery_root / name.replace(" ", "_")
+            if not resume_destination.exists() and legacy_destination.exists():
+                resume_destination = legacy_destination
+        if resume_destination and resume_destination.exists():
+            if not (resume_destination / "project.godot").is_file():
+                return ExecutionResult.failure("El destino existente no es un proyecto Godot", "GAME_RESUME_DESTINATION_INVALID")
+            expected_delivery = snapshot(resume_destination)
+    delivery_type = str(payload.get("delivery_type", "source"))
+    if delivery_type not in {"source", "source_and_exe", "exe"}:
+        return ExecutionResult.failure("Formato de entrega no soportado", "GAME_DELIVERY_INVALID")
+    needs_exe = delivery_type in {"source_and_exe", "exe"}
+    if needs_exe and not GodotExporter().templates_available():
+        return ExecutionResult(
+            ok=False, code="GAME_EXPORT_TEMPLATES_MISSING",
+            message="Faltan las plantillas de Godot para entregar el ejecutable Windows",
+            data={"diagnostics": ["Escribe 'busca las plantillas de Godot' para buscar archivos locales, "
+                                  "o 'instala las plantillas de Godot' para descargar la version oficial exacta. "
+                                  "Tambien puedes seleccionar Codigo fuente Godot."]})
+    result_message = "Base de proyecto Godot creada; contiene una plantilla inicial"
     if payload.get("generate_full_code"):
-        result = GodotGameDeveloper(
-            OllamaClient(timeout=float(payload.get("timeout", 240))), workspace,
-            str(payload.get("model", "qwen2.5-coder:7b"))).develop(
-                str(payload.get("objective", "")), name,
-                genre=str(payload.get("genre", "top_down")), confirmed=True)
+        objective = str(payload.get("objective", ""))
+        acceptance = str(payload.get("acceptance", ""))
+        if acceptance:
+            objective += "\nCRITERIOS DEL USUARIO: " + acceptance
+        genre = str(payload.get("genre", "top_down"))
+        is_chess = any(word in objective.casefold() for word in ("ajedrez", "chess"))
+        chess_route = genre == "chess_3d" or (is_chess and "3d" in objective.casefold())
+        bundled = chess_route and payload.get("generation_strategy", "bundled") != "model"
+        client, model = None, ""
+        if not bundled:
+            client = OllamaClient(timeout=float(payload.get("timeout", 240)))
+            from igris_os.ai.model_selection import select_coding_model
+            try:
+                model = select_coding_model(client.models(), str(payload.get("model") or ""))
+            except ValueError as exc:
+                return ExecutionResult.failure(str(exc), "GAME_MODEL_UNAVAILABLE")
+            if not model:
+                return ExecutionResult.failure("No hay un modelo local de generacion disponible", "GAME_MODEL_UNAVAILABLE")
+        if chess_route:
+            if bundled:
+                from igris_os.games.bundled_chess import BundledChessDeveloper
+                developer = BundledChessDeveloper(workspace, on_progress=payload.get("on_progress"))
+            else:
+                from igris_os.games.sequential_developer import SequentialGodotGameDeveloper
+                developer = SequentialGodotGameDeveloper(client, workspace, model, on_progress=payload.get("on_progress"))
+            developer.task_payload = {k: v for k, v in payload.items()
+                                      if k not in {"workspace", "on_progress", "mission_id"} and not k.startswith("__")}
+            if resumed:
+                from igris_os.games.resume_files import clone_project
+                try:
+                    clone_project(resume_source, developer._project_path(name))
+                except (OSError, ValueError) as exc:
+                    return ExecutionResult.failure(str(exc), "GAME_RESUME_COPY_FAILED")
+            result = developer.develop_chess_3d(objective, name, confirmed=True, **({"resume": True} if resumed else {}))
+        else:
+            result = GodotGameDeveloper(client, workspace, model).develop(
+                objective, name, genre=genre, confirmed=True)
         if not result.ok or result.project is None:
+            diagnostics = list(result.diagnostics) or [result.message]
+            report_path = ""
+            try:
+                from uuid import uuid4
+                workspace.mkdir(parents=True, exist_ok=True)
+                report = workspace / ("ERROR_JUEGO_" + uuid4().hex[:12] + ".json")
+                report.write_text(json.dumps({
+                    "ok": False, "objective": objective, "model": model,
+                    "message": result.message, "diagnostics": diagnostics,
+                    "partial_project": str(result.project) if result.project else None,
+                    "delivered": False,
+                }, ensure_ascii=False, indent=2), encoding="utf-8")
+                report_path = str(report)
+            except OSError as exc:
+                diagnostics.append("No se pudo guardar el informe: " + str(exc))
             return ExecutionResult(
                 ok=False, code="GAME_CODE_GENERATION_FAILED",
                 message=result.message,
-                data={"diagnostics": list(result.diagnostics),
+                data={"diagnostics": diagnostics, "diagnostic_report": report_path,
+                  "partial_project": str(result.project) if result.project else "",
+                  "checkpoint": str(result.project / "IGRIS_PROGRESS.json") if result.project else "",
                   "models_tried": list(getattr(result, 'models_tried', []))},
             )
         project = result.project
-        generated_files = result.changed_files
+        generated_files = getattr(result, "changed_files", getattr(result, "files", ()))
+        result_message = result.message
     else:
         project = GodotProjectFactory(workspace).create(
             name, genre=str(payload.get("genre", "top_down")), confirmed=True)
         generated_files = ()
+    if needs_exe:
+        exported = GodotExporter().export(
+            project, project / "build" / "juego.exe", confirmed=True)
+        if not exported.ok:
+            return ExecutionResult(
+                ok=False, code="GAME_EXPORT_UNVERIFIED", message=exported.message,
+                data={"diagnostics": [exported.verification or exported.message],
+                      "partial_project": str(project)})
+        if (project / "IGRIS_BASELINE.json").is_file():
+            (project / "JUGAR.cmd").write_bytes(b'@echo off\r\nsetlocal DisableDelayedExpansion\r\ncd /d "%~dp0"\r\nstart "" "build\\juego.exe"\r\n')
     brief = payload.get("brief")
     if isinstance(brief, dict):
         (project / "PROJECT_BRIEF.json").write_text(
             json.dumps(brief, ensure_ascii=False, indent=2), encoding="utf-8")
     delivered = project
     destination = str(payload.get("delivery_root", "")).strip()
-    if destination:
+    backup = ""
+    applied_files = tuple(generated_files)
+    if resumed and resume_destination is not None and expected_delivery is not None:
+        from igris_os.games.resume_files import publish_changes
+        try:
+            backup = str(workspace / "before_resume_delivery")
+            applied_files = tuple(publish_changes(project, resume_destination, expected_delivery, backup))
+        except (OSError, ValueError) as exc:
+            return ExecutionResult(False, "GAME_RESUME_DELIVERY_CONFLICT", str(exc),
+                                   data={"partial_project": str(project), "diagnostics": [str(exc)]})
+        delivered = resume_destination
+    elif destination:
         delivery_root = Path(destination).expanduser().resolve()
         if not delivery_root.is_dir():
             return ExecutionResult.failure(
                 "La carpeta de entrega no existe", "DELIVERY_PATH_INVALID")
-        target = delivery_root / project.name
+        delivery_name = str(payload.get("name", project.name)).strip()
+        if not delivery_name or delivery_name in {".", ".."} or any(c in delivery_name for c in '/\\:') or delivery_name.endswith((".", " ")):
+            return ExecutionResult.failure("Nombre de entrega invalido", "DELIVERY_PATH_INVALID")
+        target = delivery_root / delivery_name
         if target.exists():
             return ExecutionResult.failure(
                 "Ya existe una entrega con ese nombre", "DELIVERY_PATH_EXISTS")
         shutil.copytree(project, target)
         delivered = target
     return ExecutionResult.success(
-        "Proyecto Godot creado",
+        result_message,
         project=str(delivered), staged_project=str(project),
-        delivery_type=str(payload.get("delivery_type", "source")),
-        generated_files=generated_files)
+        delivery_type=delivery_type,
+        executable=str(delivered / "build" / "juego.exe") if needs_exe else "",
+        acceptance_verified=False,
+        updated_existing=bool(backup and applied_files), backup=backup,
+        generated_files=generated_files, changed_files=applied_files,
+        report=str(next((delivered / filename for filename in
+                         ('IGRIS_VERIFICATION.json', 'CODE_DELIVERY.json')
+                         if (delivered / filename).is_file()), '')))
 
 
 def _godot_export(payload):
@@ -858,31 +1058,57 @@ def _repository_stage(payload):
 
 def _repository_develop(payload):
     client = OllamaClient(timeout=float(payload.get("timeout", 240)))
-    result = RepositoryDeveloper(
-        client, Path(payload["workspace"]),
-        str(payload.get("model", "qwen2.5-coder:7b"))).propose(
-            Path(payload["root"]), str(payload.get("objective", "")),
-            confirmed=True, on_progress=payload.get("on_progress"))
+    try:
+        model, fallback_models = _installed_programming_models(client, payload)
+    except ValueError as exc:
+        return ExecutionResult.failure(str(exc), "PROGRAMMING_MODEL_UNAVAILABLE")
+    developer = RepositoryDeveloper(
+        client, Path(payload["workspace"]), model,
+        fallback_models=fallback_models)
+    objective = str(payload.get("objective", ""))
+    result = developer.propose(Path(payload["root"]), objective, confirmed=True,
+                               on_progress=payload.get("on_progress"))
     if not result.ok:
         return ExecutionResult.failure(result.message, "REPOSITORY_DEVELOP_FAILED")
+    checked = developer.verify_staged(Path(result.staged_root))
+    if not checked.ok:
+        diagnostics = (Path(checked.report).read_text(encoding="utf-8")
+                       if checked.report else checked.message)
+        checked = developer.repair_until_verified(Path(result.staged_root), objective,
+                                                   diagnostics, max_attempts=3,
+                                                   on_progress=payload.get("on_progress"))
+    if not checked.ok:
+        return ExecutionResult.failure(checked.message, "REPOSITORY_NOT_VERIFIED", data={
+            "staged_root": result.staged_root, "diagnostics": list(checked.diagnostics),
+            "verified": False})
     return ExecutionResult.success(
-        result.message, repository_changes={
+        "Cambios del repositorio verificados en copia aislada", project=result.staged_root,
+        verified=True, repository_changes={
             "staged_root": result.staged_root, "report": result.report,
-            "changed_files": result.changed_files,
+            "staging_manifest": str(
+                Path(payload["workspace"]).resolve() /
+                "output" / "staging_manifest.json"),
+            "verification_report": checked.report,
+            "changed_files": tuple(dict.fromkeys((*result.changed_files, *checked.changed_files))),
             "original_modified": False})
 
 
 def _repository_repair(payload):
     client = OllamaClient(timeout=float(payload.get("timeout", 120)))
+    try:
+        model, fallback_models = _installed_programming_models(client, payload)
+    except ValueError as exc:
+        return ExecutionResult.failure(str(exc), "PROGRAMMING_MODEL_UNAVAILABLE")
     developer = RepositoryDeveloper(
-        client, Path(payload["workspace"]),
-        str(payload.get("model", "qwen2.5-coder:7b")))
+        client, Path(payload["workspace"]), model,
+        fallback_models=fallback_models)
     result = developer.repair_until_verified(
         Path(payload["staged_root"]),
         str(payload.get("objective", "Corrige los tests")),
         str(payload.get("diagnostics", "")),
         max_attempts=min(3, max(1, int(payload.get("max_attempts", 3)))),
         timeout=min(120, max(1, int(payload.get("timeout", 60)))),
+        on_progress=payload.get("on_progress"),
     )
     if not result.ok:
         return ExecutionResult.failure(result.message, "REPAIR_NOT_VERIFIED")
@@ -894,6 +1120,37 @@ def _repository_repair(payload):
         attempts=result.attempts,
         diagnostics=result.diagnostics,
         verified=True,
+    )
+
+
+def _repository_apply_verified(payload):
+    workspace = Path(payload["workspace"]).resolve()
+    staged_root = Path(payload["staged_root"]).resolve()
+    verification = RepositoryDeveloper(
+        None, workspace, "verification-only").verify_staged(
+            staged_root,
+            timeout=min(120, max(1, int(payload.get("timeout", 60)))))
+    if not verification.ok:
+        return ExecutionResult.failure(
+            "El staging ya no supera sus pruebas; no se aplicó al original",
+            "REPOSITORY_STAGING_NOT_VERIFIED",
+            data={"diagnostics": verification.diagnostics,
+                  "verification_report": verification.report})
+    try:
+        result = RepositoryChangeApplier(workspace).apply(
+            Path(payload["source_root"]), staged_root,
+            list(payload.get("changed_files", ())),
+            Path(payload["staging_manifest"]), confirmed=True)
+    except (ValueError, OSError, PermissionError, json.JSONDecodeError) as exc:
+        return ExecutionResult.failure(str(exc), "REPOSITORY_APPLY_FAILED")
+    return ExecutionResult.success(
+        "Cambios verificados aplicados al repositorio original",
+        updated_existing=True,
+        verified=True,
+        project=result.source_root,
+        backup=result.backup_root,
+        report=result.report,
+        changed_files=result.changed_files,
     )
 
 

@@ -6,9 +6,10 @@ from igris_os.capabilities import (
     register_core_capabilities, register_creation_capabilities,
     register_git_capabilities, register_voice_capabilities, register_system_health,
 )
-from igris_os.security import PermissionPolicy
+from igris_os.security import PermissionPolicy, SecurityAuditLogger
 from igris_os.storage.audit import AuditLog
 from igris_os.storage.workspace import MissionWorkspace
+from igris_os.capabilities.host import register_host_capabilities
 
 
 def build_igris(runtime: Path | None = None) -> IgrisKernel:
@@ -16,6 +17,7 @@ def build_igris(runtime: Path | None = None) -> IgrisKernel:
     registry = CapabilityRegistry()
     register_system_health(registry)
     register_core_capabilities(registry)
+    register_host_capabilities(registry)
     register_creation_capabilities(registry)
     register_git_capabilities(registry)
     register_voice_capabilities(registry)
@@ -26,7 +28,7 @@ def build_igris(runtime: Path | None = None) -> IgrisKernel:
         approval = SamadminApprovalAuthority(SamadminClient(endpoint))
     return IgrisKernel(
         registry,
-        PermissionPolicy(),
+        PermissionPolicy(SecurityAuditLogger(root / "logs" / "security_audit.jsonl")),
         AuditLog(root / "audit" / "events.jsonl"),
         MissionWorkspace(root / "missions"),
         approval=approval,

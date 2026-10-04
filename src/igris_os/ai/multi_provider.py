@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import copy
 import os
 from dataclasses import dataclass, field
 from enum import Enum
@@ -11,11 +12,7 @@ try:
 except ImportError:
     load_dotenv = None
 
-try:
-    from litellm import completion, acompletion
-    LITELLM_AVAILABLE = True
-except ImportError:
-    LITELLM_AVAILABLE = False
+LITELLM_AVAILABLE = False
 
 if load_dotenv is not None:
     load_dotenv()
@@ -123,8 +120,9 @@ class MultiProviderRouter:
         "general": [ProviderRank.OLLAMA, ProviderRank.DEEPSEEK, ProviderRank.GROQ, ProviderRank.ANTHROPIC, ProviderRank.OPENAI],
     }
     
-    def __init__(self, fallback_enabled: bool = True) -> None:
+    def __init__(self, fallback_enabled: bool = True, local_client: Any | None = None) -> None:
         self.fallback_enabled = fallback_enabled
+        self._local_client = local_client
         self.custom_priority = self._parse_custom_priority()
         self._availability_cache = {}
         
@@ -155,6 +153,8 @@ class MultiProviderRouter:
     
     def _is_provider_available(self, provider: ProviderRank) -> bool:
         """Check if provider is available with valid credentials."""
+        if provider != ProviderRank.OLLAMA:
+            return False
         if provider in self._availability_cache:
             return self._availability_cache[provider]
             
@@ -168,13 +168,17 @@ class MultiProviderRouter:
             self._availability_cache[provider] = False
             return False
             
-        # For Ollama, check if litellm is available
-        if provider == ProviderRank.OLLAMA and not LITELLM_AVAILABLE:
-            self._availability_cache[provider] = False
-            return False
-            
-        self._availability_cache[provider] = config.available
-        return config.available
+        if self._local_client is None:
+            from igris_os.ai import OllamaClient
+            self._local_client = OllamaClient()
+        available = bool(self._local_models())
+        self._availability_cache[provider] = available
+        return available
+
+    def _local_models(self) -> tuple[str, ...]:
+        return tuple(model for model in self._local_client.models()
+                     if ':cloud' not in model.lower()
+                     and not model.lower().startswith(('cloud/', 'moonshot/')))
     
     def _estimate_cost(self, provider: ProviderRank, max_tokens: int) -> float:
         """Estimate cost for generation request."""
@@ -210,68 +214,31 @@ class MultiProviderRouter:
     
     def _execute_with_provider(self, provider: ProviderRank, request: GenerationRequest) -> GenerationResponse:
         """Execute generation request with specific provider."""
-        if not LITELLM_AVAILABLE:
+        if provider != ProviderRank.OLLAMA:
             return GenerationResponse(
-                text="", provider=provider, model="", success=False,
-                error="litellm not available"
-            )
-            
-        config = self.PROVIDER_CONFIGS[provider]
-        
+                text='', provider=provider, model='', success=False,
+                error='Proveedor bloqueado: IGRIS solo permite inferencia local sin suscripciones')
         try:
-            # Prepare litellm parameters
-            litellm_params = {
-                "model": config.model,
-                "messages": [],
-                "temperature": request.temperature,
-                "max_tokens": request.max_tokens,
-            }
-            
-            if request.system_prompt:
-                litellm_params["messages"].append({"role": "system", "content": request.system_prompt})
-            litellm_params["messages"].append({"role": "user", "content": request.prompt})
-            
-            # Add API key if needed (litellm handles this automatically with env vars)
-            if config.api_key_env:
-                api_key = os.getenv(config.api_key_env)
-                if api_key:
-                    litellm_params["api_key"] = api_key
-                
-            # Add base URL for Ollama
-            if config.base_url_env:
-                base_url = os.getenv(config.base_url_env)
-                if base_url:
-                    litellm_params["api_base"] = base_url
-            
-            # Execute request
-            response = completion(**litellm_params)
-            
-            # Extract response
-            text = response.choices[0].message.content if response.choices else ""
-            tokens_used = response.usage.total_tokens if response.usage else 0
-            cost = self._estimate_cost(provider, tokens_used)
-            
+            from igris_os.ai import OllamaClient
+            from igris_os.ai.model_selection import select_installed_model
+
+            if self._local_client is None:
+                self._local_client = OllamaClient()
+            model = select_installed_model(self._local_models())
+            if not model:
+                raise RuntimeError('No hay modelos locales disponibles')
+            client = copy.copy(self._local_client)
+            client.output_token_limit = min(8192, max(256, request.max_tokens))
+            prompt = ((request.system_prompt + '\n\n') if request.system_prompt else '') + request.prompt
+            reply = client.generate(prompt, model)
             return GenerationResponse(
-                text=text,
-                provider=provider,
-                model=config.model,
-                tokens_used=tokens_used,
-                cost_usd=cost,
-                success=True
-            )
-            
-        except Exception as e:
-            logger.error(f"Provider {provider.value} failed: {str(e)}")
-            return GenerationResponse(
-                text="", provider=provider, model=config.model,
-                success=False, error=str(e)
-            )
+                text=reply.text, provider=provider, model=reply.model,
+                cost_usd=0.0, success=reply.ok, error=reply.error)
+        except Exception as exc:
+            return GenerationResponse('', provider, '', success=False, error=str(exc))
     
     def generate(self, request: GenerationRequest) -> GenerationResponse:
         """Generate response with automatic fallback."""
-        if not LITELLM_AVAILABLE:
-            raise RuntimeError("litellm is required for multi-provider routing")
-            
         selected_provider = self._select_provider(request)
         response = self._execute_with_provider(selected_provider, request)
         

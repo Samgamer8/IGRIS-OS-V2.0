@@ -1,0 +1,30 @@
+{
+  "name": "ajedrez-combat-3d",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "predev": "node tools/prepare-engine.mjs",
+    "dev": "vite",
+    "prebuild": "node tools/prepare-engine.mjs",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test tests/rules.test.js tests/pieces.test.js tests/combat.test.js tests/studio.test.js tests/real-assets.test.js tests/board-layout.test.js",
+    "models": "node tools/export-pieces.mjs",
+    "test:visual": "playwright test tests/board-visual.spec.js --reporter=line"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3",
+    "vite": "^8.3.0"
+  },
+  "dependencies": {
+    "@fontsource/barlow-condensed": "^5.3.0",
+    "@fontsource/manrope": "^5.3.0",
+    "chess.js": "^1.4.0",
+    "lucide": "^1.51.0",
+    "stockfish": "^19.0.0",
+    "three": "^0.186.1"
+  }
+}

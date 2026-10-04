@@ -176,8 +176,13 @@ try:
     test_mod = _load("test_solution", test_code,
                      _os.path.join(ROOT, "test_solution.py"))
     suite = _unittest.defaultTestLoader.loadTestsFromModule(test_mod)
+    for name, value in sorted(vars(test_mod).items()):
+        if name.startswith("test_") and isinstance(value, _types.FunctionType):
+            suite.addTest(_unittest.FunctionTestCase(value))
+    if suite.countTestCases() == 0:
+        raise RuntimeError("No se descubrieron pruebas unittest ejecutables")
     result = _unittest.TextTestRunner(verbosity=1).run(suite)
-    _sys.exit(0 if result.wasSuccessful() else 1)
+    _sys.exit(0 if result.wasSuccessful() and result.testsRun > len(result.skipped) else 1)
 except SystemExit:
     raise
 except BaseException as exc:
@@ -215,11 +220,9 @@ def _sys_executable() -> str:
 
 def _filtered_env() -> dict[str, str]:
     """Copia el entorno sin variables que puedan contener secretos."""
-    sensitive = ("KEY", "TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL",
-                 "PRIVATE")
-    clean: dict[str, str] = {}
-    for key, value in os.environ.items():
-        if any(frag in key.upper() for frag in sensitive):
-            continue
-        clean[key] = value
-    return clean
+    allowed = {"PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT",
+               "TEMP", "TMP", "TMPDIR", "HOME", "USERPROFILE", "APPDATA",
+               "LOCALAPPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMDATA",
+               "LANG", "LC_ALL", "LC_CTYPE", "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH",
+               "VIRTUAL_ENV"}
+    return {key: value for key, value in os.environ.items() if key.upper() in allowed}

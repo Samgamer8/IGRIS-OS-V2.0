@@ -115,5 +115,28 @@ class GodotRuntime:
                                  timeout=self.timeout)
         except subprocess.TimeoutExpired:
             return GodotRun(False, -1, "Godot agoto el tiempo", command)
+        except OSError as exc:
+            return GodotRun(False, -1, "No se pudo ejecutar Godot: " + str(exc), command)
         output = (run.stdout or "") + (run.stderr or "")
-        return GodotRun(run.returncode == 0, run.returncode, output, command)
+        script_error = any(marker in output for marker in ("SCRIPT ERROR:", "Parse Error:"))
+        blender_warning = "Blender path is invalid or not set" in output and "Cannot configure blender path in headless mode." in output
+        project_dir = None
+        try:
+            if "--path" in args:
+                pos = args.index("--path")
+                if pos + 1 < len(args):
+                    project_dir = Path(args[pos + 1]).expanduser()
+            elif "-p" in args:
+                pos = args.index("-p")
+                if pos + 1 < len(args):
+                    project_dir = Path(args[pos + 1]).expanduser()
+        except (TypeError, ValueError):
+            project_dir = None
+        has_blend_asset = bool(project_dir and project_dir.is_dir() and any(project_dir.rglob("*.blend")))
+        if blender_warning and has_blend_asset:
+            ok = False
+        elif script_error:
+            ok = False
+        else:
+            ok = run.returncode == 0 or (blender_warning and not has_blend_asset)
+        return GodotRun(ok, run.returncode, output, command)

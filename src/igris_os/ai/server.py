@@ -7,10 +7,12 @@ comprueba y apaga en loopback. Tambien soporta LM Studio via API OpenAI.
 from __future__ import annotations
 
 import os
+import json
 import shutil
 import subprocess
 import time
 import urllib.request
+from urllib.parse import urlsplit
 from pathlib import Path
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -55,16 +57,35 @@ def is_ollama_running(endpoint: str = DEFAULT_ENDPOINT) -> bool:
 
 
 def is_local_llm_running() -> bool:
-    """True si Ollama o LM Studio estan activos."""
-    return is_ollama_running() or is_lmstudio_running()
+    """Comprueba todos los motores locales admitidos por el cliente."""
+    return is_ollama_running() or is_lmstudio_running() or is_openai_running()
+
+
+def is_openai_running(endpoint: str | None = None) -> bool:
+    from igris_os.ai.ollama import _is_loopback_endpoint, _openai_endpoint_from_env
+
+    endpoint = endpoint or _openai_endpoint_from_env()
+    if not _is_loopback_endpoint(endpoint):
+        return False
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        with opener.open(endpoint + '/v1/models', timeout=1.5) as response:
+            data = json.load(response)
+            return response.status == 200 and isinstance(data, dict) and isinstance(data.get('data'), list)
+    except (OSError, ValueError, urllib.error.URLError):
+        return False
 
 
 def detect_backend() -> str:
     """Devuelve 'ollama', 'lmstudio' o 'none'."""
+    if os.environ.get('IGRIS_PREFERRED_BACKEND') == 'openai' and is_openai_running():
+        return 'openai'
     if is_ollama_running():
         return "ollama"
     if is_lmstudio_running():
         return "lmstudio"
+    if is_openai_running():
+        return "openai"
     return "none"
 
 
@@ -119,6 +140,57 @@ class OllamaServer:
         return self.is_running() or self.start()
 
 
+class LlamaCppServer(OllamaServer):
+    def __init__(self, executable: Path, model: Path, endpoint: str,
+                 alias: str = 'qwen2.5-coder:7b', idle_seconds: int = 180):
+        from igris_os.ai.ollama import _is_loopback_endpoint
+
+        if not _is_loopback_endpoint(endpoint):
+            raise ValueError('El motor nativo debe usar loopback')
+        if not alias.strip() or not 30 <= idle_seconds <= 3600:
+            raise ValueError('Configuracion nativa invalida')
+        self.executable = Path(executable)
+        self.model = Path(model)
+        self.endpoint = endpoint.rstrip('/')
+        self.alias = alias
+        self.idle_seconds = idle_seconds
+        self._proc = None
+
+    def is_running(self) -> bool:
+        return is_openai_running(self.endpoint)
+
+    def start(self, wait: float = 45.0) -> bool:
+        if self.is_running():
+            return True
+        if not self.executable.is_file() or not self.model.is_file():
+            return False
+        with self.model.open('rb') as model_file:
+            if model_file.read(4) != b'GGUF':
+                return False
+        address = urlsplit(self.endpoint)
+        command = [str(self.executable), '--model', str(self.model), '--alias', self.alias,
+                   '--host', address.hostname, '--port', str(address.port or 80),
+                   '--ctx-size', '4096', '--parallel', '1', '--n-gpu-layers', '99',
+                   '--cache-type-k', 'q8_0', '--cache-type-v', 'q8_0', '--flash-attn', 'on',
+                   '--threads', str(min(os.cpu_count() or 4, 8)),
+                   '--sleep-idle-seconds', str(self.idle_seconds), '--no-webui',
+                   '--cors-origins', self.endpoint, '--no-cors-credentials']
+        log = _PROJECT_ROOT / 'runtime/logs/native_inference.log'
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with log.open('a', encoding='utf-8') as output:
+            self._proc = subprocess.Popen(command, stdout=output, stderr=output,
+                                          creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        deadline = time.monotonic() + wait
+        while time.monotonic() < deadline:
+            if self._proc.poll() is not None:
+                return False
+            if self.is_running():
+                return True
+            time.sleep(0.2)
+        self.stop()
+        return False
+
+
 def ensure_ollama_server(auto: bool = False) -> bool:
     """Asegura un servidor LLM en loopback (Ollama o LM Studio).
 
@@ -128,6 +200,23 @@ def ensure_ollama_server(auto: bool = False) -> bool:
     Mantiene una referencia global al servidor para evitar procesos huerfanos.
     """
     global _GLOBAL_SERVER
+    native_executable = os.environ.get('IGRIS_NATIVE_EXECUTABLE', '').strip()
+    native_model = os.environ.get('IGRIS_NATIVE_MODEL_PATH', '').strip()
+    if os.environ.get('IGRIS_PREFERRED_BACKEND') == 'openai' and native_executable and native_model:
+        if is_openai_running():
+            return True
+        if not auto:
+            return False
+        if not isinstance(_GLOBAL_SERVER, LlamaCppServer):
+            from igris_os.ai.ollama import _openai_endpoint_from_env
+
+            if _GLOBAL_SERVER is not None:
+                _GLOBAL_SERVER.stop()
+            _GLOBAL_SERVER = LlamaCppServer(
+                Path(native_executable), Path(native_model), _openai_endpoint_from_env(),
+                os.environ.get('IGRIS_NATIVE_MODEL_ALIAS', 'qwen2.5-coder:7b'),
+                int(os.environ.get('IGRIS_NATIVE_IDLE_SECONDS', '180')))
+        return _GLOBAL_SERVER.start()
     if is_local_llm_running():
         return True
     if not auto:
@@ -137,18 +226,33 @@ def ensure_ollama_server(auto: bool = False) -> bool:
     return _GLOBAL_SERVER.start()
 
 
+def stop_owned_server() -> None:
+    global _GLOBAL_SERVER
+    if _GLOBAL_SERVER is not None:
+        _GLOBAL_SERVER.stop()
+        _GLOBAL_SERVER = None
+
+
 def server_status() -> dict:
+    from igris_os.ai.ollama import _openai_endpoint_from_env
+
     exe = _path_ollama()
     ollama_ok = is_ollama_running()
     lmstudio_ok = is_lmstudio_running()
-    running = ollama_ok or lmstudio_ok
-    backend = "ollama" if ollama_ok else ("lmstudio" if lmstudio_ok else "none")
+    openai_ok = is_openai_running()
+    running = ollama_ok or lmstudio_ok or openai_ok
+    backend = "ollama" if ollama_ok else ("lmstudio" if lmstudio_ok else ("openai" if openai_ok else "none"))
+    if os.environ.get('IGRIS_PREFERRED_BACKEND') == 'openai' and openai_ok:
+        backend = 'openai'
+    endpoint = (DEFAULT_ENDPOINT if backend == 'ollama' else
+                LMSTUDIO_ENDPOINT if backend == 'lmstudio' else _openai_endpoint_from_env())
     return {
         "running": running,
         "backend": backend,
-        "internal": bundled_ollama() is not None,
-        "executable": str(exe) if exe else None,
-        "endpoint": LMSTUDIO_ENDPOINT if backend == "lmstudio" else DEFAULT_ENDPOINT,
+        "internal": backend == 'ollama' and bundled_ollama() is not None,
+        "executable": (str(exe) if exe and backend == 'ollama' else
+                   os.environ.get('IGRIS_NATIVE_EXECUTABLE') if backend == 'openai' else None),
+        "endpoint": endpoint if running else DEFAULT_ENDPOINT,
     }
 
 

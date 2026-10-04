@@ -17,6 +17,7 @@ from .production_readiness import (
 from .creation_readiness import CreationReadinessResult, FullApplicationCreationBenchmark
 from .advanced_verifier import AdvancedVerifier, QualityReport, SecurityAudit
 from .verifier import IndependentVerifier, Verdict
+from .live_autonomy import LiveQualificationResult, run_live_qualification, run_live_suite
 
 __all__ = [
     "BenchmarkCase", "BenchmarkResult", "LocalProgrammingBenchmark",
@@ -30,4 +31,5 @@ __all__ = [
     "CreationReadinessResult", "FullApplicationCreationBenchmark",
     "AdvancedVerifier", "QualityReport", "SecurityAudit",
     "IndependentVerifier", "Verdict",
+    "LiveQualificationResult", "run_live_qualification", "run_live_suite",
 ]

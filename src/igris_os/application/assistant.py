@@ -9,12 +9,32 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from igris_os.ai import ModelRouter, OllamaClient
 from igris_os.application.director import MissionDirector
+from igris_os.application.intent_classifier import (
+    is_conversation_intent, normalize_intent,
+)
 from igris_os.domain import Mission, MissionBranch
 from igris_os.memory.compressor import ContextCompressor
 from igris_os.security.sandbox import JobObjectSandbox, SandboxRun
 
 
+PERSONALITY = """ESTILO DE IGRIS:
+- Responde siempre en espanol, salvo que el usuario pida otro idioma. No mezcles idiomas.
+- Estilo de mayordomo moderno: educado, sereno, firme, servicial y con criterio propio.
+- Trata al usuario de usted por defecto, sin solemnidad excesiva; adapta el trato si lo pide.
+- No repitas 'senor' ni formulas de obediencia en cada frase. Tu identidad es IGRIS, no JARVIS.
+- Se sincero y directo. No des la razon por complacer ni adules al usuario.
+- Si discrepas, explica brevemente el motivo y ofrece una alternativa concreta.
+- Reconoce los errores y la incertidumbre sin excusas, dramatismo ni falsas promesas.
+- No ocultes ni maquilles errores al usuario, aunque te lo pida. Informale y propone corregirlos.
+- Usa humor seco solo de forma ocasional y nunca ante un fallo serio o una preocupacion del usuario.
+- Contesta con dos a cuatro frases cuando baste; amplia solo si la pregunta o el trabajo lo requiere.
+- No conviertas cada respuesta en una lista, un informe o una oferta de ayuda repetida.
+- Distingue los hechos comprobados de las suposiciones y de las acciones pendientes.
+"""
+
+
 SYSTEM = """Eres IGRIS OS. Eres un sistema productivo de creación y un operador local seguro.
+""" + PERSONALITY + """
 
 TONO:
 - Directo, natural, sin relleno ni florituras.
@@ -102,7 +122,7 @@ class ConversationState:
 
     def recent_context(self, limit: int = 20) -> List[Dict[str, str]]:
         context = []
-        for turn in self.turns[-limit:]:
+        for turn in list(self.turns)[-max(1, limit):]:
             context.append({"role": turn.role, "text": turn.text})
             for tc in turn.tool_calls:
                 context.append({"role": "tool", "text": f"[{tc.tool_name}] {tc.output}"})
@@ -115,24 +135,15 @@ class ConversationState:
             self.turns.popleft()
 
 
+def standalone_sha256(text: str) -> str | None:
+    """Devuelve un SHA-256 pegado como unico contenido, sin consultar al LLM."""
+    value = text.strip().casefold()
+    return value if re.fullmatch(r'[0-9a-f]{64}', value) else None
+
+
 def is_conversational_input(text: str) -> bool:
-    """Clasifica charla y seguimientos sin generar respuestas prefijadas."""
-    normalized = unicodedata.normalize("NFD", text.casefold())
-    normalized = "".join(c for c in normalized if unicodedata.category(c) != "Mn")
-    normalized = re.sub(r"[^\w\s]", " ", normalized)
-    normalized = " ".join(normalized.split())
-    task_words = (
-        "analiza", "construye", "crea", "genera", "modifica", "corrige",
-        "programa", "ejecuta", "compila", "instala", "revisa", "investiga",
-        "busca", "prepara", "disena", "haz un", "haz una", "desarrolla",
-        "hacerme", "puedes hacerme", "me puedes hacer", "podrias hacer",
-        "podrías hacer",
-    )
-    if any(f" {word} " in f" {normalized} " for word in task_words):
-        return False
-    padded = f" {normalized} "
-    return bool(normalized) and not any(
-        f" {word} " in padded for word in task_words)
+    """Una única fuente de verdad decide si el turno puede ir al chat."""
+    return is_conversation_intent(text)
 
 
 class AssistantService:
@@ -150,7 +161,8 @@ class AssistantService:
             "git_status": self._tool_git_status,
             "git_diff": self._tool_git_diff,
             "system_info": self._tool_system_info,
-            "run_command": self._tool_run_command,
+            # La conversacion no recibe shell generico. La programacion y la
+            # administracion se ejecutan mediante capabilities tipadas.
         }
         self.state = ConversationState()
         self.on_tool_call = on_tool_call
@@ -244,6 +256,10 @@ class AssistantService:
         return result.stdout.strip() or "no changes"
 
     def _tool_system_info(self, args: str) -> str:
+        import os
+        import platform
+        if os.name != "nt":
+            return "Sistema operativo: " + platform.platform()
         result = self._run_sandboxed(["systeminfo"], timeout_seconds=30)
         if result.timed_out:
             return "[TIMEOUT] systeminfo excedio el limite"
@@ -296,6 +312,26 @@ class AssistantService:
         if not objective.strip():
             return AssistantReply(False, "Escribe una orden.", "", 0)
         lower = objective.strip().lower()
+        from igris_os.application.intent_classifier import classify_intent
+        if classify_intent(objective).subtype == 'media_creation':
+            return AssistantReply(False,
+                'Esta peticion necesita un motor multimedia y una ejecucion real. '
+                'El chat no ha generado ni guardado ningun archivo; no voy a prometer una entrega desde esta respuesta.',
+                'local', backend='local', data={'requires_execution': True})
+        if self._is_self_description_question(lower):
+            text = (
+                "Soy IGRIS OS, un asistente local creado para conversar contigo y "
+                "ayudarte a convertir tus objetivos en trabajo útil. Puedo apoyarte "
+                "con programación y revisión de proyectos o archivos, juegos Godot "
+                "y algunas tareas locales de Windows y multimedia. Antes de hacer "
+                "cambios importantes pido autorización; si una herramienta no está "
+                "disponible en este equipo, te lo diré claramente. También puedo "
+                "responder por voz cuando el audio local está activo."
+            )
+            self.state.add_conversation_turn("user", objective.strip())
+            self.state.add_conversation_turn("assistant", text)
+            return AssistantReply(
+                True, text, "local", self.compressor.estimate_tokens(text), "local")
         exam_terms = ("estado del examen", "trabajos del examen",
                       "entregas del examen", "donde estan los trabajos del examen",
                       "dónde están los trabajos del examen")
@@ -307,9 +343,12 @@ class AssistantService:
             conversation_context = self._conversation_context(context)
             reply = self.client.generate(
                 self._conversation_prompt(objective.strip(), conversation_context), model)
-            if not reply.ok:
-                fallback_models = tuple(self.client.models())
-                fallback = next((name for name in fallback_models if name != model), "")
+            missing_model = any(term in (reply.error or "").casefold() for term in
+                                ("not found", "no encontrado", "no existe", "404"))
+            if not reply.ok and missing_model:
+                fallback_models = tuple(name for name in self.client.models() if name != model)
+                from igris_os.ai.model_selection import select_installed_model
+                fallback = select_installed_model(fallback_models)
                 if fallback:
                     model = fallback
                     reply = self.client.generate(
@@ -346,10 +385,31 @@ class AssistantService:
     def _is_conversation(text: str) -> bool:
         return is_conversational_input(text)
 
+    @staticmethod
+    def _is_self_description_question(text: str) -> bool:
+        normalized = normalize_intent(text)
+        return bool(
+            re.search(
+                r"\b(?:quien eres|que eres|que (?:me )?puedes decir de ti|"
+                r"hablame de ti|cuentame(?: un poco)? (?:sobre|de) ti|para que (?:te )?"
+                r"(?:crearon|estas creado|estas creada|fuiste creado|fuiste creada)|"
+                r"para que sirves)\b",
+                normalized,
+            )
+            or re.search(
+                r"\b(?:explicame|esplicame|cuentame|dime)\b.{0,70}"
+                r"\b(?:funciones|habilidades|capacidades)\b",
+                normalized,
+            )
+        )
+
     def _conversation_model(self) -> str:
-        """Usa el modelo conversacional configurable sin sondeo previo."""
-        return os.environ.get(
-            "IGRIS_CONVERSATION_MODEL", "qwen2.5-coder:7b").strip()
+        """Honor an explicit setting; otherwise use an installed local model."""
+        configured = os.environ.get("IGRIS_CONVERSATION_MODEL", "").strip()
+        if configured:
+            return configured
+        from igris_os.ai.model_selection import select_installed_model
+        return select_installed_model(self.client.models()) or "qwen2.5-coder:7b"
 
     def _conversation_context(self, context: Tuple[str, ...]) -> Tuple[str, ...]:
         """Combina memoria externa con los turnos estructurados de esta instancia."""
@@ -364,16 +424,22 @@ class AssistantService:
     def _conversation_prompt(objective: str, context: Tuple[str, ...]) -> str:
         recent = "\n".join(context[-8:])
         return (
+            PERSONALITY + "\n" +
             "Eres IGRIS en una conversacion real, no un agente de soporte ni un folleto. "
             "Responde al ultimo mensaje con lenguaje natural, claro y conciso. "
-            "No te presentes, no enumeres tus funciones y no uses frases de plantilla. "
+            "No te presentes ni enumeres funciones salvo que el usuario pregunte por tu identidad, "
+            "proposito, habilidades o capacidades; en ese caso responde directamente y con ejemplos reales. "
             "No termines cada respuesta con '¿En que puedo ayudarte?' ni cambies de tema. "
             "Tu identidad es IGRIS OS, no la del fabricante o nombre del modelo. "
             "No digas que eres Alibaba, Qwen, una empresa ni un chatbot genérico. "
             "No afirmes que solo puedes conversar: IGRIS puede usar herramientas locales "
             "cuando el usuario lo solicite mediante el flujo seguro. "
-            "Nunca digas que no puedes crear archivos o proyectos en el PC: si detectas "
-            "un encargo operativo, indica brevemente que debe pasar al flujo local de misión. "
+            "IGRIS OS es un asistente local multiproposito para conversar, ayudar con programacion y "
+            "revision de proyectos/archivos, juegos Godot y algunas tareas locales de Windows y multimedia. "
+            "No inventes capacidades disponibles en este equipo. "
+            "Si detectas un encargo operativo, indica que debe pasar al flujo local de misión. "
+            "No prometas entregas completas ni afirmes que hay herramientas o modelos disponibles "
+            "sin evidencia de una comprobacion real. "
             "Si el usuario saluda, saluda y continua la charla; si pregunta por ti, responde sobre ti. "
             "Si comenta una respuesta anterior, contesta a ese comentario de forma directa. "
             "No inventes hechos: si no sabes algo, dilo; si falta contexto, pregunta una sola cosa concreta. "

@@ -17,7 +17,14 @@ from typing import Any
 SETTINGS_FILENAME = "settings.json"
 
 DEFAULTS: dict[str, Any] = {
+    "panel_mode": "modern",
     "openai_endpoint": "http://127.0.0.1:30000",
+    "preferred_backend": "",
+    "exclusive_backend": False,
+    "native_executable": "",
+    "native_model_path": "",
+    "native_model_alias": "qwen2.5-coder:7b",
+    "native_idle_seconds": 180,
 }
 
 logger = logging.getLogger(__name__)
@@ -37,6 +44,8 @@ def load_settings(runtime_root: Path) -> dict[str, Any]:
             settings.update({k: v for k, v in data.items() if v is not None})
     except (OSError, ValueError) as exc:
         logger.warning("No se pudo cargar la configuracion de %s: %s", path, exc)
+    if settings.get('panel_mode') not in {'modern', 'original'}:
+        settings['panel_mode'] = DEFAULTS['panel_mode']
     return settings
 
 
@@ -61,6 +70,13 @@ def apply_ai_settings(settings: dict[str, Any]) -> str:
     if not endpoint:
         endpoint = str(DEFAULTS["openai_endpoint"])
     os.environ["IGRIS_OPENAI_ENDPOINT"] = endpoint
+    preferred = str(settings.get('preferred_backend') or '').strip().lower()
+    if preferred not in {'', 'ollama', 'lmstudio', 'openai'}:
+        raise ValueError('Motor preferido invalido')
+    os.environ['IGRIS_PREFERRED_BACKEND'] = preferred
+    os.environ['IGRIS_EXCLUSIVE_BACKEND'] = str(bool(settings.get('exclusive_backend', False))).lower()
+    for key in ('native_executable', 'native_model_path', 'native_model_alias', 'native_idle_seconds'):
+        os.environ['IGRIS_' + key.upper()] = str(settings.get(key, DEFAULTS[key]) or '')
     try:
         from igris_os.ai import ollama as ollama_mod
         ollama_mod.reset_backend_detection()

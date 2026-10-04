@@ -16,6 +16,7 @@ class ProjectRepairEvidence:
     tests_passed: bool
     changed_files: tuple[str, ...]
     summary: str
+    reviewed_files: tuple[str, ...] = ()
 
 
 class ProjectStagingRepairer(Protocol):
@@ -54,16 +55,16 @@ class ProjectRepairAdapter:
             raise ValueError("La reparación no superó las pruebas posteriores")
         if not evidence.summary.strip():
             raise ValueError("La evidencia de reparación está vacía")
-        if not evidence.changed_files:
+        if not evidence.changed_files and not evidence.reviewed_files:
             raise ValueError("La reparación no registra archivos modificados")
-        for relative in evidence.changed_files:
+        for relative in (*evidence.changed_files, *evidence.reviewed_files):
             candidate = (repaired_root / relative).resolve()
             if not candidate.is_file() or not candidate.is_relative_to(repaired_root):
                 raise ValueError("La reparación contiene una ruta inválida")
-        summary = (
-            f"Reparación verificada en {repaired_root.name}: "
-            f"{len(evidence.changed_files)} archivos; {evidence.summary}"
-        )
+        summary = (f"Reparación verificada en {repaired_root.name}: "
+                   f"{len(evidence.changed_files)} archivos; {evidence.summary}"
+                   if evidence.changed_files else
+                   f"Revision verificada sin modificaciones: {evidence.summary}")
         repaired_mission = replace(
             project_mission,
             flow=project_mission.flow.record(

@@ -4,10 +4,12 @@ import re
 import threading
 import base64
 import queue
+import logging
 from pathlib import Path
 
 
 POWERSHELL = "powershell.exe"
+logger = logging.getLogger(__name__)
 
 
 def _powershell_startupinfo() -> object | None:
@@ -83,7 +85,7 @@ class WindowsVoice:
         self._resident = None
         self._current_voice_name = None
         self._speak_lock = threading.Lock()
-        self._speech_queue: queue.Queue[tuple[str, str | None] | None] = queue.Queue(maxsize=1)
+        self._speech_queue: queue.Queue[tuple[str, str | None] | None] = queue.Queue(maxsize=16)
         self._speech_thread = threading.Thread(
             target=self._speech_worker, name="igris-tts", daemon=True)
         self._speech_thread.start()
@@ -148,10 +150,6 @@ class WindowsVoice:
         if not clean_text:
             return False
         try:
-            self._speech_queue.get_nowait()
-        except queue.Empty:
-            pass
-        try:
             self._speech_queue.put_nowait((clean_text, voice_name))
             return True
         except queue.Full:
@@ -172,11 +170,13 @@ class WindowsVoice:
                         self._resident.stdin.write("VOICE:" + voice_name + "\n")
                         self._resident.stdin.flush()
                         self._current_voice_name = voice_name
-                    encoded = base64.b64encode(
-                        clean_text.encode("utf-8")).decode("ascii")
-                    self._resident.stdin.write("TEXT:" + encoded + '\n')
-                    self._resident.stdin.flush()
+                    for segment in self._speech_segments(clean_text):
+                        encoded = base64.b64encode(
+                            segment.encode("utf-8")).decode("ascii")
+                        self._resident.stdin.write("TEXT:" + encoded + '\n')
+                        self._resident.stdin.flush()
                 except (OSError, ValueError):
+                    logger.exception("Falló la síntesis local de voz")
                     self._resident = None
 
     @staticmethod
@@ -189,7 +189,35 @@ class WindowsVoice:
         clean = re.sub(r"[,/\\|<>+=~^:;'-]+", " ", clean)
         clean = re.sub(r"[^\w\s.?!¡¿]", " ", clean, flags=re.UNICODE)
         clean = re.sub(r"\s+", " ", clean).strip()
-        return clean[:3000]
+        return clean[:12000]
+
+    @staticmethod
+    def _speech_segments(text: str, limit: int = 320) -> tuple[str, ...]:
+        """Split long speech into ordered, readable phrases without dropping text."""
+        segments: list[str] = []
+        current = ""
+
+        def flush() -> None:
+            nonlocal current
+            if current:
+                segments.append(current)
+                current = ""
+
+        for sentence in re.split(r"(?<=[.!?])\s+", text):
+            for word in sentence.split():
+                if len(word) > limit:
+                    flush()
+                    segments.extend(word[index:index + limit]
+                                    for index in range(0, len(word), limit))
+                elif current and len(current) + 1 + len(word) > limit:
+                    flush()
+                    current = word
+                else:
+                    current = (current + " " + word).strip()
+            if current and current[-1:] in ".?!¡¿":
+                flush()
+        flush()
+        return tuple(segments)
 
     def listen(self) -> str:
         try:

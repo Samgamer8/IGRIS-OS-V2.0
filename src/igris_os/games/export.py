@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 import subprocess
 import time
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -83,24 +84,21 @@ class ExportResult:
 
 
 class GodotExporter:
-    def __init__(self, runtime: GodotRuntime | None = None) -> None:
+    def __init__(self, runtime: GodotRuntime | None = None, search_root: Path | None = None) -> None:
         self.runtime = runtime or GodotRuntime()
+        self.search_root = search_root or Path(__file__).resolve().parents[3]
+
+    def template_status(self) -> dict:
+        from igris_os.games.templates import discover_templates
+        return discover_templates(self.search_root, self.runtime.executable, self.runtime.version())
 
     def templates_dir(self) -> Path | None:
         """Directorio de plantillas con plantilla Windows release x86_64."""
-        appdata = os.environ.get("APPDATA", "")
-        root = Path(appdata) / "Godot" / "export_templates"
-        if not root.is_dir():
-            return None
-        for pattern in ("*/windows_release_x86_64.exe",
-                        "*/templates/windows_release_x86_64.exe"):
-            matches = sorted(root.glob(pattern))
-            if matches:
-                return matches[-1].parent
-        return None
+        item = next((item for item in self.template_status()["directories"] if item["compatible"]), None)
+        return Path(item["path"]) if item else None
 
     def templates_available(self) -> bool:
-        return self.templates_dir() is not None
+        return self.template_status()["ready"]
 
     def export(self, project: Path, output: Path, *,
                confirmed: bool = False, launch_check: bool = True) -> ExportResult:
@@ -111,13 +109,22 @@ class GodotExporter:
             return ExportResult(False, "Proyecto Godot no disponible")
         if not self.runtime.available:
             return ExportResult(False, "Godot no esta disponible")
-        if not self.templates_available():
-            return ExportResult(False, "Plantillas de exportacion no instaladas")
-        self._write_preset(project)
+        status = self.template_status()
+        if not status["ready"]:
+            return ExportResult(False, "No hay plantillas compatibles con Godot " + status["expected_version"])
         output = Path(output).resolve()
         output.parent.mkdir(parents=True, exist_ok=True)
-        run = self.runtime._run("--headless", "--path", str(project),
-                                "--export-release", PRESET_NAME, str(output))
+        from igris_os.games.templates import prepared_templates
+        try:
+            with prepared_templates(status) as templates:
+                self._write_preset(project, templates)
+                try:
+                    run = self.runtime._run("--headless", "--path", str(project),
+                                            "--export-release", PRESET_NAME, str(output))
+                finally:
+                    self._write_preset(project)
+        except (OSError, ValueError) as exc:
+            return ExportResult(False, "No se pudieron preparar las plantillas: " + str(exc))
         if not run.ok or not output.is_file():
             return ExportResult(False, "Exportacion fallida: " + run.output[-400:])
         size = output.stat().st_size
@@ -131,9 +138,16 @@ class GodotExporter:
             verified, verification)
 
     @staticmethod
-    def _write_preset(project: Path) -> None:
+    def _write_preset(project: Path, templates: Path | None = None) -> None:
+        preset = EXPORT_PRESET
+        if templates:
+            for mode in ("debug", "release"):
+                template = templates / f"windows_{mode}_x86_64.exe"
+                if template.is_file():
+                    preset = preset.replace(f'custom_template/{mode}=""',
+                                            f'custom_template/{mode}=' + json.dumps(template.as_posix(), ensure_ascii=False))
         (project / "export_presets.cfg").write_text(
-            EXPORT_PRESET, encoding="utf-8")
+            preset, encoding="utf-8")
 
     @staticmethod
     def verify_exe(path: Path | str) -> tuple[bool, str]:

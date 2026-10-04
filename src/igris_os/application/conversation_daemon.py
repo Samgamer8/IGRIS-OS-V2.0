@@ -43,7 +43,11 @@ class _ProcessAIClient:
         return list(self.models())
 
     def generate(self, prompt: str, model: str) -> ModelReply:
-        result = self._runner.generate(prompt, model=model)
+        options = {'model': model}
+        limit = getattr(self._runner, 'output_token_limit', None)
+        if limit is not None:
+            options['output_limit'] = limit
+        result = self._runner.generate(prompt, **options)
         return ModelReply(
             ok=bool(result.get("ok")),
             text=str(result.get("text") or ""),
@@ -51,6 +55,17 @@ class _ProcessAIClient:
             error=str(result.get("error") or result.get("reason") or ""),
             backend=str(result.get("backend") or ""),
             reasoning=str(result.get("reasoning") or ""),
+        )
+
+    def generate_json(self, prompt: str, model: str, schema: dict) -> ModelReply:
+        result = self._runner.generate_json(prompt, model=model, schema=schema)
+        return ModelReply(
+            ok=bool(result.get("ok")),
+            text=str(result.get("text") or ""),
+            model=str(result.get("model") or model),
+            error=str(result.get("error") or result.get("reason") or ""),
+            backend=str(result.get("backend") or ""),
+            metadata=dict(result.get("metadata") or {}),
         )
 
 

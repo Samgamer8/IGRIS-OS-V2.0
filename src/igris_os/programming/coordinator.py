@@ -1,19 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-
+from dataclasses import dataclass, field, replace
+import hashlib
+import math
+import uuid
+import os
 from pathlib import Path
-
 from typing import Callable
 
-
-
 from igris_os.programming.specialists import (
-
     SpecialistRegistry,
-
     SpecialistRole,
-
 )
 from igris_os.programming.workshop import PythonWorkshop, RepairResult
 from igris_os.utils.json_parser import StrictJSONParser
@@ -56,675 +53,257 @@ class AutonomousResult:
 
 
 class AutonomousProgrammingCoordinator:
-    def __init__(self, client, workspace: Path,
+    def __init__(self, client=None, workspace=None,
                  default_model: str = "qwen2.5-coder:7b",
                  review_model: str = "qwen2.5-coder:14b") -> None:
         self.client = client
-        self.workspace = workspace.resolve()
+        self.workspace = workspace.resolve() if workspace else Path(os.getcwd())
         self.default_model = default_model
         self.review_model = review_model
-        self.registry = SpecialistRegistry(client)
+        self.registry = SpecialistRegistry(self.client)
+        self.registry.ROLES = dict(self.registry.ROLES)
+        for role in (SpecialistRole.ARCHITECT, SpecialistRole.PROGRAMMER):
+            self.registry.ROLES[role] = replace(self.registry.ROLES[role], model=default_model)
+        self.registry.ROLES[SpecialistRole.REVIEWER] = replace(
+            self.registry.ROLES[SpecialistRole.REVIEWER], model=review_model)
         self.max_attempts = 3
         self._plan_cache = {}
+
+    def is_engineering_task(self, text: str) -> bool:
+        keywords = ("crear", "programar", "desarrollar", "codigo", "app", "web", "juego", "script", "fix", "arreglar")
+        return any(word in text.lower() for word in keywords)
+
+    def execute_mission(self, objective: str) -> str:
+        result = self.execute(objective, confirmed=True)
+        if result.ok:
+            return f"Misión completada con éxito. Puntaje: {result.review.score if result.review else 'N/A'}"
+        return f"La misión falló: {result.message}"
+
+    def execute_react(self, objective: str, *,
+                      confirmed: bool = False,
+                      context: str = "",
+                      language: str = "python",
+                      on_progress: Callable[[int, str], None] | None = None
+                      ) -> AutonomousResult:
+        return self.execute(objective, confirmed=confirmed, context=context,
+                           language=language, on_progress=on_progress)
+
     @classmethod
     def _extract_json(cls, text: str) -> dict:
         return StrictJSONParser.extract(text)
 
-
     def execute(self, objective: str, *,
-
                 confirmed: bool = False,
-
                 context: str = "",
-
                 language: str = "python",
-
                 on_progress: Callable[[int, str], None] | None = None
-
                 ) -> AutonomousResult:
 
         if not confirmed:
-
             return AutonomousResult(False, "Se necesita confirmacion")
 
         if not objective.strip():
-
             return AutonomousResult(False, "Falta el objetivo")
 
-
-
-        cache_key = objective.strip().casefold()
+        if language.strip().casefold() != "python":
+            return AutonomousResult(False, "Este taller verifica Python; usa el flujo multilenguaje",
+                                    diagnostics=("unsupported_language",))
+        cache_key = (objective.strip(), context, language.strip().casefold())
 
         plan = self._plan_cache.get(cache_key)
 
         if plan is None:
-
             if on_progress:
-
                 on_progress(5, "Fase 1: Arquitectura")
-
             plan = self._architect(objective, context, language)
-
             if plan is None and self._supports_fallback(objective):
-
                 plan = self._fallback_plan(objective, language)
-
             if plan:
-
                 self._plan_cache[cache_key] = plan
 
         if not plan:
-
             return AutonomousResult(False, "Fallo en fase de arquitectura",
-
                                    diagnostics=("architect_failed",))
 
-
-
         if on_progress:
+            on_progress(20, "Fase 2: Implementacion y Verificacion Interna")
 
-            on_progress(20, "Fase 2: Implementacion")
-
-        proposal = self._program(objective, plan, context, language)
-
-        if proposal is None and self._supports_fallback(objective):
-
-            proposal = self._fallback_program(objective, plan, language)
-
-        if proposal is None:
-
-            return AutonomousResult(False, "Fallo en fase de implementacion",
-
+        # BUCLE DE AUTO-CORRECCIÓN ABSOLUTA
+        max_internal_attempts = 5
+        current_proposal = None
+        
+        for attempt in range(1, max_internal_attempts + 1):
+            if on_progress:
+                on_progress(20 + (attempt * 5), f"Verificando estabilidad (Intento {attempt}/{max_internal_attempts})")
+            
+            proposal = self._program(objective, plan, context, language)
+            if proposal is None and self._supports_fallback(objective):
+                proposal = self._fallback_program(objective, plan, language)
+            
+            if proposal:
+                verified = self._verify_and_repair(proposal, on_progress)
+                if verified is not None:
+                    current_proposal = verified
+                    break
+        
+        if not current_proposal:
+            return AutonomousResult(False, "El sistema no pudo generar un código estable tras múltiples intentos",
                                    plan=plan,
-
-                                   diagnostics=("programmer_failed",))
-
-
+                                   diagnostics=("internal_verification_failed",))
 
         if on_progress:
+            on_progress(80, "Fase 4: Revision de Calidad")
 
-            on_progress(50, "Fase 3: Verificacion con reparacion")
-
-        verified = self._verify_and_repair(proposal, on_progress)
-
-        if verified is None and self._supports_fallback(objective):
-
-            proposal = self._fallback_program(objective, plan, language)
-
-            verified = self._verify_and_repair(proposal, on_progress)
-
-        if verified is None:
-
-            return AutonomousResult(False, "No supero verificacion",
-
-                                   plan=plan, proposal=proposal,
-
-                                   attempts=self.max_attempts,
-
-                                   diagnostics=("verification_failed",))
-
-
-
-        if on_progress:
-
-            on_progress(80, "Fase 4: Revision independiente")
-
-        review = self._review(verified, objective, plan, language)
+        review = self._review(current_proposal, objective, plan, language)
 
         if review is None and self._supports_fallback(objective):
-
             review = ReviewVerdict(
-
                 approved=True,
-
                 score=0.93,
-
                 issues=(),
-
                 suggestions=("Validacion automatica completada por fallback determinista.",),
-
             )
 
         if review is None:
-
             return AutonomousResult(False, "Fallo en revision",
-
-                                   plan=plan, proposal=verified,
-
-                                   attempts=self.max_attempts,
-
+                                   plan=plan, proposal=current_proposal,
+                                   attempts=max_internal_attempts,
                                    diagnostics=("review_failed",))
 
-
+        if not review.approved:
+            return AutonomousResult(False, "La revision rechazo la propuesta",
+                                    proposal=current_proposal, review=review, plan=plan,
+                                    diagnostics=("review_rejected", *review.issues))
 
         if on_progress:
-
             on_progress(100, "Completado")
 
         return AutonomousResult(True, "Mision completada",
+                               proposal=current_proposal, review=review, plan=plan)
 
-                               proposal=verified, review=review, plan=plan)
+    def _is_absolute_mode(self) -> bool:
+        return True
 
-
-    def execute_react(self, objective: str, *,
-
-                      confirmed: bool = False,
-
-                      context: str = "",
-
-                      language: str = "python",
-
-                      on_progress: Callable[[int, str], None] | None = None
-
-                      ) -> AutonomousResult:
-
-        if not confirmed:
-
-            return AutonomousResult(False, "Se necesita confirmacion")
-
-        if not objective.strip():
-
-            return AutonomousResult(False, "Falta el objetivo")
-
-        cache_key = objective.strip().casefold()
-
-        plan = self._plan_cache.get(cache_key)
-
-        if plan is None:
-
-            if on_progress:
-
-                on_progress(5, "ReAct: Pensamiento inicial")
-
-            plan = self._architect(objective, context, language)
-
-            if plan is None and self._supports_fallback(objective):
-
-                plan = self._fallback_plan(objective, language)
-
-            if plan:
-
-                self._plan_cache[cache_key] = plan
-
-        if not plan:
-
-            return AutonomousResult(False, "Fallo en arquitectura",
-
-                                    diagnostics=("architect_failed",))
-
-        current = None
-
-        for attempt in range(1, self.max_attempts + 1):
-
-            if on_progress:
-
-                on_progress(10 + int(70 * attempt / self.max_attempts),
-
-                            f"ReAct: Accion {attempt}")
-
-            proposal = self._program(objective, plan, context, language)
-
-            if proposal is None and self._supports_fallback(objective):
-
-                proposal = self._fallback_program(objective, plan, language)
-
-            if proposal is None:
-
-                return AutonomousResult(False, "Fallo en implementacion",
-
-                                        plan=plan,
-
-                                        diagnostics=("programmer_failed",))
-
-            if on_progress:
-
-                on_progress(10 + int(70 * attempt / self.max_attempts) + 5,
-
-                            f"ReAct: Observacion {attempt}")
-
-            verified = self._verify_and_repair(proposal, on_progress)
-
-            if verified is None and self._supports_fallback(objective):
-
-                proposal = self._fallback_program(objective, plan, language)
-
-                verified = self._verify_and_repair(proposal, on_progress)
-
-            if verified is not None:
-
-                if on_progress:
-
-                    on_progress(90, "ReAct: Revision final")
-
-                review = self._review(verified, objective, plan, language)
-
-                if review is None and self._supports_fallback(objective):
-
-                    review = ReviewVerdict(
-
-                        approved=True,
-
-                        score=0.93,
-
-                        issues=(),
-
-                        suggestions=("Validacion automatica completada por fallback determinista.",),
-
-                    )
-
-                if review is not None:
-
-                    return AutonomousResult(True, "Mision completada",
-
-                                            proposal=verified, review=review,
-
-                                            plan=plan, attempts=attempt)
-
-        return AutonomousResult(False, "No supero verificacion",
-
-                                plan=plan, attempts=self.max_attempts,
-
-                                diagnostics=("verification_failed",))
-
+    def _gather_project_context(self) -> str:
+        context_parts = []
+        state_file = self.workspace / "PROJECT_STATE.json"
+        if state_file.exists():
+            context_parts.append(f"ESTADO:\n{state_file.read_text()}")
+        return "\n\n".join(context_parts)
 
     @staticmethod
-
     def _supports_fallback(objective: str) -> bool:
-
         text = objective.casefold()
-
         calculator_words = ("calculadora", "calculator", "suma", "resta", "multiplica", "divide", "operacion")
-
         return any(word in text for word in calculator_words)
 
-
-
     def _fallback_plan(self, objective: str, language: str) -> ArchitecturePlan:
-
         return ArchitecturePlan(
-
             modules=("calculator", "cli", "validation"),
-
             interfaces=("calculate", "main", "validate_input"),
-
             risks=("Entrada no numerica", "Division por cero"),
-
             acceptance=(
-
                 "La calculadora soporta suma, resta, multiplicacion y division",
-
                 "El CLI pide dos numeros y la operacion",
-
                 "Las pruebas validan los casos principales y de error",
-
             ),
-
-            plan=(
-
-                f"Diseño de una solucion simple para '{objective}' en {language}. "
-
-                "Se implementa una unica modulo auto-contenido con funciones puras para cada operacion "
-
-                "y una funcion main() con menu textual y validacion de entradas."
-
-            ),
-
+            plan=f"Diseño de una solucion simple para '{objective}' en {language}.",
         )
 
-
-
-    def _fallback_program(self, objective: str, plan: ArchitecturePlan,
-
-                          language: str) -> CodeProposal:
-
+    def _fallback_program(self, objective: str, plan: ArchitecturePlan, language: str) -> CodeProposal:
         if "calculadora" in objective.casefold() or "calculator" in objective.casefold():
-
-            source = '''
-
-def add(a: float, b: float) -> float:
-
-    return a + b
-
-
-
-
-
-def subtract(a: float, b: float) -> float:
-
-    return a - b
-
-
-
-
-
-def multiply(a: float, b: float) -> float:
-
-    return a * b
-
-
-
-
-
-def divide(a: float, b: float) -> float:
-
-    if b == 0:
-
-        raise ValueError("No se puede dividir entre cero")
-
-    return a / b
-
-
-
-
-
-def calculate(first: float, second: float, operation: str) -> float:
-
-    operation = operation.strip().lower()
-
-    if operation == "+":
-
-        return add(first, second)
-
-    if operation == "-":
-
-        return subtract(first, second)
-
-    if operation == "*":
-
-        return multiply(first, second)
-
-    if operation == "/":
-
-        return divide(first, second)
-
-    raise ValueError(f"Operacion no soportada: {operation}")
-
-
-
-
-
-def main() -> None:
-
-    print("Calculadora IGRIS")
-
-    print("Operaciones soportadas: +, -, *, /")
-
-    raw_first = input("Primer numero: ")
-
-    raw_second = input("Segundo numero: ")
-
-    raw_operation = input("Operacion (+, -, *, /): ")
-
-    try:
-
-        first = float(raw_first)
-
-        second = float(raw_second)
-
-        result = calculate(first, second, raw_operation)
-
-        print(f"Resultado: {result}")
-
-    except ValueError as exc:
-
-        print(f"Error: {exc}")
-
-
-
-
-
-if __name__ == "__main__":
-
-    main()
-
-'''
-
-            tests = '''from solution import add, subtract, multiply, divide, calculate
-
-
-
-
-
-def test_add():
-
-    assert add(2, 3) == 5
-
-
-
-
-
-def test_subtract():
-
-    assert subtract(8, 3) == 5
-
-
-
-
-
-def test_multiply():
-
-    assert multiply(4, 5) == 20
-
-
-
-
-
-def test_divide():
-
-    assert divide(9, 3) == 3
-
-
-
-
-
-def test_calculate():
-
-    assert calculate(10, 2, "+") == 12
-
-    assert calculate(10, 2, "-") == 8
-
-    assert calculate(10, 2, "*") == 20
-
-    assert calculate(10, 2, "/") == 5
-
-
-
-
-
-def test_divide_by_zero_raises():
-
-    try:
-
-        divide(5, 0)
-
-        assert False, "Debio lanzar ValueError"
-
-    except ValueError:
-
-        logger_msg = 'Coordinador: ruta por defecto procesada'
-
-'''
-
-            return CodeProposal(
-
-                source=source,
-
-                tests=tests,
-
-                explanation="Entregable determinista para una calculadora CLI simple en Python.",
-
-                sha256="",
-
+            source = (
+                "def calculate(a, b, operation):\n"
+                "    if operation == '+':\n"
+                "        return a + b\n"
+                "    if operation == '-':\n"
+                "        return a - b\n"
+                "    if operation == '*':\n"
+                "        return a * b\n"
+                "    if operation == '/':\n"
+                "        if b == 0:\n"
+                "            raise ZeroDivisionError('division by zero')\n"
+                "        return a / b\n"
+                "    raise ValueError(f'operacion no soportada: {operation}')\n\n"
+                "def main():\n"
+                "    print('Calculadora')\n"
+                "    print(calculate(2, 3, '+'))\n\n"
+                "if __name__ == '__main__':\n"
+                "    main()\n"
             )
-
+            tests = (
+                "from solution import calculate\n\n"
+                "def test_calculate_add():\n"
+                "    assert calculate(2, 3, '+') == 5\n\n"
+                "def test_calculate_multiply():\n"
+                "    assert calculate(4, 5, '*') == 20\n\n"
+                "def test_divide_by_zero_raises():\n"
+                "    try:\n"
+                "        calculate(10, 0, '/')\n"
+                "    except ZeroDivisionError:\n"
+                "        pass\n"
+                "    else:\n"
+                "        raise AssertionError('division by zero should raise')\n"
+            )
+            return CodeProposal(source=source, tests=tests, explanation="Fallback calculadora", sha256="")
         return None
 
-
-
     def _architect(self, objective: str, context: str, language: str) -> ArchitecturePlan | None:
-
-        prompt = (
-
-            "OBJETIVO:\n" + objective +
-
-            ("\nCONTEXTO:\n" + context if context else "") +
-
-            f"\nLENGUAJE: {language}\n\nGenera plan arquitectonico JSON."
-
-        )
-
+        prompt = f"ARQUITECTO: Diseña {objective} en {language}. Devuelve JSON: {{modules:[], interfaces:[], risks:[], acceptance:[], plan:''}}"
         output = self.registry.execute(SpecialistRole.ARCHITECT, prompt)
-
-        if not output.ok:
-
-            return None
-
+        if not output.ok: return None
         try:
-
-            data = StrictJSONParser.extract(output.text)
-
+            text = output.text
+            if "```json" in text: text = text.split("```json")[1].split("```")[0]
+            data = StrictJSONParser.extract(text)
             return ArchitecturePlan(
-
-                modules=self._as_text(data.get("modules", [])),
-
-                interfaces=self._as_text(data.get("interfaces", [])),
-
-                risks=self._as_text(data.get("risks", [])),
-
-                acceptance=self._as_text(data.get("acceptance", [])),
-
+                modules=tuple(str(i) for i in data.get("modules", [])),
+                interfaces=tuple(str(i) for i in data.get("interfaces", [])),
+                risks=tuple(str(i) for i in data.get("risks", [])),
+                acceptance=tuple(str(i) for i in data.get("acceptance", [])),
                 plan=str(data.get("plan", "")),
-
             )
-
-        except (ValueError, TypeError, KeyError):
-
-            return None
-
-
+        except: return None
 
     @staticmethod
-
     def _as_text(items) -> tuple[str, ...]:
+        return tuple(str(i) for i in items)
 
-        out = []
-        for item in items:
-            if isinstance(item, str):
-                out.append(item)
-            elif isinstance(item, dict):
-                for key in ("name", "description", "title", "criterion", "text"):
-                    if key in item:
-                        out.append(str(item[key]))
-                        break
-                else:
-                    out.append(str(item))
-            else:
-                out.append(str(item))
-        return tuple(out)
-
-    def _program(self, objective: str, plan: ArchitecturePlan,
-                 context: str, language: str) -> CodeProposal | None:
-        acceptance = "\n".join("- " + item for item in plan.acceptance)
-        prompt = (
-            "OBJETIVO:\n" + objective +
-            f"\nLENGUAJE: {language}\n" +
-            "\nPLAN ARQUITECTONICO:\n" + plan.plan +
-            "\nMODULOS:\n" + "\n".join("- " + m for m in plan.modules) +
-            "\nCRITERIOS DE ACEPTACION:\n" + acceptance +
-            ("\nCONTEXTO:\n" + context if context else "") +
-            "\n\nImplementa SOLO el modulo principal como UN SOLO ARCHIVO autocontenido. "
-            "NO uses imports externos mas alla de biblioteca estandar. "
-            "Devuelve SOLO JSON SIN MARKDOWN. "
-            "El JSON debe ser valido. Usa \\n para nuevas lineas dentro de source y tests. "
-            "Los tests DEBEN usar `from solution import ...` porque el archivo se llamara solution.py. "
-            "Incluye una funcion `main()` ejecutable si el objetivo implica interfaz de consola. "
-            "NO uses sys.exit() en funciones que se van a testear; usa excepciones. "
-            "NO uses input() en funciones que se van a testear; recibe parametros. "
-            "NO incluyas imports dentro del mismo archivo (no hagas `from solution import ...` dentro de solution). "
-            "NO incluyas triple comillas sin escapar. "
-            "NO uses clases ni POO. Implementa todo como funciones modulares independientes. "
-            "Las funciones deben estar en el nivel superior del modulo para poder importarlas con `from solution import nombre_funcion`. "
-            "NO defina clases con `class` ni metodos `__init__`. "
-            'Formato: {"source":"codigo","tests":"tests","explanation":"cambios"}. '
-            "VERIFICA que el codigo sea sintacticamente correcto."
-        )
+    def _program(self, objective: str, plan: ArchitecturePlan, context: str, language: str) -> CodeProposal | None:
+        prompt = f"PROGRAMADOR: Implementa {objective} según plan: {plan.plan}. Devuelve JSON: {{source:'', tests:'', explanation:''}}"
         output = self.registry.execute(SpecialistRole.PROGRAMMER, prompt)
-
-        if not output.ok:
-
-            return None
-
+        if not output.ok: return None
         try:
-
             data = StrictJSONParser.extract(output.text)
+            return CodeProposal(source=str(data.get("source", "")), tests=str(data.get("tests", "")), explanation=str(data.get("explanation", "")), sha256="")
+        except: return None
 
-            source = str(data.get("source", "")).strip()
-
-            tests = str(data.get("tests", "")).strip()
-
-            if not source or not tests:
-
-                return None
-
-            return CodeProposal(
-
-                source=source,
-
-                tests=tests,
-
-                explanation=str(data.get("explanation", "")),
-
-                sha256="",
-
-            )
-
-        except (ValueError, TypeError, KeyError):
-
-            return None
-
-    def _verify_and_repair(self, proposal: CodeProposal,
-                           on_progress: Callable[[int, str], None] | None
-                           ) -> CodeProposal | None:
+    def _verify_and_repair(self, proposal: CodeProposal, on_progress: Callable[[int, str], None] | None) -> CodeProposal | None:
         staging = self.workspace / ".staging" / "autonomous"
         staging.mkdir(parents=True, exist_ok=True)
         workshop = PythonWorkshop(staging, repair_model=self.default_model)
-        result: RepairResult = workshop.verify_with_repair(
-            proposal.source, proposal.tests, self.client,
-            max_attempts=self.max_attempts,
-            on_progress=on_progress,
-        )
-        if not result.ok:
-            return None
-        return CodeProposal(
-            source=result.source,
-            tests=proposal.tests,
-            explanation=proposal.explanation + " (reparado)",
-            sha256="",
-        )
+        result = workshop.verify_with_repair(proposal.source, proposal.tests, self.client, max_attempts=self.max_attempts, on_progress=on_progress)
+        if not result.ok: return None
+        return CodeProposal(source=result.source, tests=proposal.tests, explanation=proposal.explanation + " (reparado)", sha256="")
 
-    def _review(self, proposal: CodeProposal, objective: str,
-                plan: ArchitecturePlan, language: str) -> ReviewVerdict | None:
-        acceptance = "\n".join("- " + item for item in plan.acceptance)
-        prompt = (
-            "OBJETIVO:\n" + objective +
-            f"\nLENGUAJE: {language}\n" +
-            "\nPLAN:\n" + plan.plan +
-            "\nACEPTACION:\n" + acceptance +
-            "\n\nCODIGO ENTREGADO:\n" + proposal.source[:8000] +
-            "\n\nTESTS:\n" + proposal.tests[:4000] +
-            "\n\nRevisa y puntua. JSON."
-        )
+    def _review(self, proposal: CodeProposal, objective: str, plan: ArchitecturePlan, language: str) -> ReviewVerdict | None:
+        prompt = f"REVISOR: Evalúa código para {objective}. Devuelve JSON: {{approved:bool, score:float, issues:[], suggestions:[]}}"
         output = self.registry.execute(SpecialistRole.REVIEWER, prompt)
-        if not output.ok:
-            return None
+        if not output.ok: return None
         try:
             data = StrictJSONParser.extract(output.text)
-            score = float(data.get("score", 0.0))
-            return ReviewVerdict(
-                approved=bool(data.get("approved", False)) and score >= 0.7,
-                score=score,
-                issues=tuple(data.get("issues", [])),
-                suggestions=tuple(data.get("suggestions", [])),
-            )
-        except (ValueError, TypeError, KeyError):
+            approved = data.get("approved", False)
+            if not isinstance(approved, bool):
+                return None
+            raw_score = data.get("score", 0.0)
+            try:
+                score = float(raw_score)
+            except (TypeError, ValueError):
+                return None
+            if not math.isfinite(score) or score < 0.0 or score > 1.0:
+                return None
+            issues = tuple(str(item) for item in data.get("issues", []))
+            suggestions = tuple(str(item) for item in data.get("suggestions", []))
+            return ReviewVerdict(approved=approved, score=score, issues=issues, suggestions=suggestions)
+        except Exception:
             return None
