@@ -39,6 +39,7 @@ class PythonMultiFileDeveloper:
 
     MAX_FILES = 20
     MAX_FILE_BYTES = 256_000
+    MAX_SYNTAX_REPAIRS = 2
 
     def __init__(self, client, workspace: Path, model: str) -> None:
         self.client = client
@@ -77,6 +78,14 @@ class PythonMultiFileDeveloper:
             try:
                 package = StrictJSONParser.extract(reply.text)
                 package = self._complete_missing_components(package, plan, active_model)
+                package, syntax_errors = self._ensure_valid_syntax(package, active_model)
+                if syntax_errors:
+                    diagnostics = "ERRORES_SINTAXIS:\n" + "\n".join(
+                        f"{path}: {error}" for path, error in syntax_errors.items())
+                    if model_index + 1 < len(model_sequence):
+                        model_index += 1
+                        active_model = model_sequence[model_index]
+                    continue
                 previous_package = package
                 root, files = self._write_package(package, plan)
                 checked = EngineeringWorkflow().run(
@@ -180,6 +189,68 @@ class PythonMultiFileDeveloper:
                 "Añade una prueba que simule input, invoque main/run_cli y compruebe "
                 "el flujo principal y la salida.")
         return ""
+
+    @staticmethod
+    def _validate_syntax(files: dict) -> dict[str, str]:
+        """Analiza TODOS los archivos .py antes de escribir nada a disco."""
+        errors: dict[str, str] = {}
+        if not isinstance(files, dict):
+            return errors
+        for raw_path, content in files.items():
+            relative = str(raw_path).replace("\\", "/")
+            if not relative.endswith(".py"):
+                continue
+            try:
+                ast.parse(str(content), filename=relative)
+            except SyntaxError as exc:
+                errors[relative] = str(exc)
+        return errors
+
+    def _ensure_valid_syntax(self, package: dict,
+                             model: str) -> tuple[dict, dict[str, str]]:
+        """Valida el paquete completo y, si hace falta, pide hasta
+        MAX_SYNTAX_REPAIRS correcciones acotadas antes de escribir a disco."""
+        files = package.get("files")
+        errors = self._validate_syntax(files)
+        if not errors:
+            return package, {}
+        generate_json = getattr(self.client, "generate_json", None)
+        for _ in range(self.MAX_SYNTAX_REPAIRS):
+            broken = "\n".join(
+                f"- {path}: {error}\n```\n{files[path]}\n```"
+                for path, error in errors.items())
+            prompt = (
+                "Devuelve SOLO JSON valido con un objeto files ruta->contenido. "
+                "Corrige UNICAMENTE los errores de sintaxis Python de estos "
+                "archivos, sin cambiar su comportamiento ni otros archivos:\n" +
+                broken)
+            schema = {
+                "type": "object",
+                "properties": {"files": {"type": "object",
+                                          "additionalProperties": {"type": "string"}}},
+                "required": ["files"],
+            }
+            reply = (generate_json(prompt, model, schema)
+                     if callable(generate_json) else self.client.generate(prompt, model))
+            if not reply.ok:
+                break
+            try:
+                fixed = StrictJSONParser.extract(reply.text)
+            except (TypeError, ValueError):
+                break
+            additions = fixed.get("files")
+            if not isinstance(additions, dict):
+                break
+            files = dict(files)
+            files.update({str(path): str(content)
+                          for path, content in additions.items()
+                          if str(path).replace("\\", "/") in errors})
+            package = dict(package)
+            package["files"] = files
+            errors = self._validate_syntax(files)
+            if not errors:
+                break
+        return package, errors
 
     def _complete_missing_components(self, package: dict,
                                      plan: ComponentPlan | None,
