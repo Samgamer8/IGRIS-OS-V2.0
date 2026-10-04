@@ -2,6 +2,7 @@ import argparse
 import json
 import shutil
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from igris_os.application import MissionDirector, RuntimeProbe
@@ -59,12 +60,55 @@ def _run_programming_mission(objective: str, *, approved: bool = False) -> int:
     return 0 if result.ok else 1
 
 
+def _run_debate(topic: str | None, *, max_turns: int | None,
+                stop_file: Path | None, log_output: Path | None) -> int:
+    from igris_os.ai.ollama import OllamaClient
+    from igris_os.evolution.dual_debate import DualDebateSession
+
+    default_topic = (
+        "Disenar una interfaz eficiente y de programacion rapida, con "
+        "todas sus funciones, para IGRIS OS en Windows 11, considerando "
+        "las caracteristicas de este PC.")
+    final_topic = topic or default_topic
+    runtime = Path("runtime")
+    stop_file = stop_file or (runtime / "debate.stop")
+    log_path = log_output or (
+        runtime / "debates" /
+        f"{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}_debate.jsonl")
+    if stop_file.exists():
+        stop_file.unlink()
+    session = DualDebateSession(OllamaClient(), final_topic, log_path=log_path)
+
+    def should_stop() -> bool:
+        if stop_file.exists():
+            stop_file.unlink(missing_ok=True)
+            return True
+        return False
+
+    print(f"Debate iniciado sobre: {final_topic}", file=sys.stderr)
+    print(f"Transcripcion en vivo: {log_path}", file=sys.stderr)
+    print(f"Para detenerlo: crea el archivo {stop_file} o pulsa Ctrl+C",
+          file=sys.stderr)
+    try:
+        session.run(should_stop, max_turns=max_turns)
+    except KeyboardInterrupt:
+        print("\nDebate interrumpido por el usuario.", file=sys.stderr)
+    markdown_path = log_path.with_suffix(".md")
+    markdown_path.write_text(session.render_markdown(), encoding="utf-8")
+    print(json.dumps({
+        "ok": True, "turns": len(session.turns),
+        "log": str(log_path), "transcript": str(markdown_path),
+    }, ensure_ascii=False, indent=2))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="igris", description="IGRIS OS")
     parser.add_argument("command", choices=("health", "capabilities", "plan",
                                             "providers", "inventory", "panel",
                                             "probe", "ai", "program", "create",
-                                            "verify", "org", "work", "work-deliver"))
+                                            "verify", "org", "work", "work-deliver",
+                                            "debate"))
     parser.add_argument("value", nargs="?")
     parser.add_argument("--source", action="append", default=[])
     parser.add_argument("--output", default="runtime/inventory/sources.json")
@@ -76,7 +120,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--destination", type=Path)
     parser.add_argument("--answer", action="append", default=[])
     parser.add_argument("--resume-report", type=Path)
+    parser.add_argument("--max-turns", type=int, default=None)
+    parser.add_argument("--stop-file", type=Path, default=None)
+    parser.add_argument("--log", type=Path, default=None)
     args = parser.parse_args(argv)
+    if args.command == "debate":
+        return _run_debate(args.value, max_turns=args.max_turns,
+                           stop_file=args.stop_file, log_output=args.log)
     if args.command in {'work', 'work-deliver'}:
         if not args.approve_execution:
             print(json.dumps({'ok': False, 'code': 'PERMISSION_REQUIRED',
