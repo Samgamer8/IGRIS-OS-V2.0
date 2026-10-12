@@ -22,7 +22,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from igris_os.domain import ActionRisk, CapabilitySpec, ExecutionResult
-from igris_os.files import ArtifactAnalyzer, RepositoryAnalyzer
+from igris_os.files import (
+    ArtifactAnalyzer, BlueprintBuilder, RepositoryAnalyzer,
+)
 
 
 def register_reverse_engineering(registry) -> None:
@@ -38,6 +40,13 @@ def register_reverse_engineering(registry) -> None:
                        "(lenguajes, simbolos, imports, tests, contexto)",
                        ActionRisk.READ_ONLY, timeout_seconds=300),
         _reverse_project)
+    registry.register(
+        CapabilitySpec("reverse.blueprint",
+                       "Convierte el analisis de un artefacto o proyecto en un "
+                       "plan de reimplementacion propio (capacidades con "
+                       "evidencia + esqueleto de codigo)",
+                       ActionRisk.READ_ONLY, timeout_seconds=180),
+        _reverse_blueprint)
 
 
 def _absolute(value) -> Path:
@@ -86,4 +95,36 @@ def _reverse_project(payload):
             "imports": len(report.imports), "tests": len(report.tests),
             "matches": report.matches, "manifest": report.manifest,
             "truncated": report.truncated, "records": records,
+        })
+
+
+def _reverse_blueprint(payload):
+    """Analiza un artefacto o proyecto y propone capacidades propias.
+
+    No copia ni desensambla: deriva caracteristicas de hechos reales (URLs,
+    framework, imports, simbolos) y genera un esqueleto de codigo con stubs.
+    """
+    target = _absolute(payload.get("path"))
+    builder = BlueprintBuilder()
+    try:
+        if target.is_dir():
+            workspace = Path(payload.get("workspace") or target.parent)
+            report = RepositoryAnalyzer(workspace).analyze(
+                target, str(payload.get("query", "")))
+            blueprint = builder.from_project(report)
+        else:
+            report = ArtifactAnalyzer().analyze(target)
+            blueprint = builder.from_artifact(report)
+    except (ValueError, OSError, PermissionError) as exc:
+        return ExecutionResult.failure(str(exc), "REVERSE_BLUEPRINT_FAILED")
+    return ExecutionResult.success(
+        "Blueprint de reimplementacion generado con evidencia",
+        reverse_blueprint={
+            "target": blueprint.target, "target_kind": blueprint.target_kind,
+            "features": [{"name": f.name, "kind": f.kind,
+                          "evidence": f.evidence, "proposal": f.proposal}
+                         for f in blueprint.features],
+            "proposed_capabilities": list(blueprint.proposed_capabilities),
+            "scaffold": blueprint.scaffold,
+            "limitations": list(blueprint.limitations),
         })

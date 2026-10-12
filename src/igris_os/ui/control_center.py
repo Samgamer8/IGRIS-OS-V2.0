@@ -162,6 +162,56 @@ def artifact_summary(path: str) -> dict[str, object]:
     }
 
 
+def blueprint_summary(path: str) -> dict[str, object]:
+    """Convierte el analisis de un archivo o carpeta en un plan propio.
+
+    No copia ni desensambla: deriva capacidades originales a partir de hechos
+    reales (URLs, framework, imports, simbolos) y devuelve un esqueleto de
+    codigo con stubs que hay que completar. Pensado para software propio o
+    autorizado.
+    """
+    from igris_os.files import ArtifactAnalyzer, BlueprintBuilder, RepositoryAnalyzer
+    target = Path(path)
+    builder = BlueprintBuilder()
+    if target.is_dir():
+        report = RepositoryAnalyzer(target.parent).analyze(target, "")
+        blueprint = builder.from_project(report)
+    elif target.is_file():
+        report = ArtifactAnalyzer().analyze(target)
+        blueprint = builder.from_artifact(report)
+    else:
+        raise ValueError("La ruta no existe: " + str(path))
+    caps = blueprint.proposed_capabilities
+    lines = [
+        f"Objetivo: {blueprint.target}",
+        f"Tipo de analisis: {blueprint.target_kind}",
+        f"Caracteristicas detectadas: {len(blueprint.features)}",
+        "",
+        "Capacidades PROPIAS propuestas (inspiradas en lo observado):",
+    ]
+    if caps:
+        lines.extend(f"  · {c['name']} — {c['description']}\n"
+                     f"      evidencia: {c['motivation']}" for c in caps)
+    else:
+        lines.append("  (ninguna caracteristica accionable detectada)")
+    lines += [
+        "",
+        "Como funciona: IGRIS NO copia ni desensambla el objetivo. Propone",
+        "capacidades nuevas y un esqueleto (scaffold) con stubs que completas",
+        "tu. Cada propuesta enlaza a la evidencia real que la motiva.",
+        "",
+        "Esqueleto de codigo generado (guárdalo y completa cada TODO):",
+        "─" * 60,
+        blueprint.scaffold,
+    ]
+    return {
+        "path": str(target), "target_kind": blueprint.target_kind,
+        "features": len(blueprint.features),
+        "proposed_capabilities": [c["name"] for c in caps],
+        "scaffold": blueprint.scaffold, "text": "\n".join(lines),
+    }
+
+
 def deep_diagnostic() -> dict[str, object]:
     """Diagnóstico completo y real del PC y de la salud de IGRIS OS."""
     import igris_os
@@ -348,9 +398,15 @@ class AcademyDialog(QDialog):
         remove.clicked.connect(self.remove_program)
         analyze = QPushButton("Analizar (ingeniería inversa)")
         analyze.clicked.connect(self.analyze_selected)
+        blueprint = QPushButton("Plan de implementación propio")
+        blueprint.setToolTip(
+            "Deriva capacidades originales de IGRIS a partir del análisis, con "
+            "evidencia y un esqueleto de código. No copia ni desensambla.")
+        blueprint.clicked.connect(self.blueprint_selected)
         row.addWidget(add)
         row.addWidget(remove)
         row.addWidget(analyze)
+        row.addWidget(blueprint)
         layout.addLayout(row)
         self.refresh()
 
@@ -385,6 +441,20 @@ class AcademyDialog(QDialog):
                 "implementación, pídeselo por chat (no clona código: reimplementa "
                 "lo que observes aquí).")
         self.details.setPlainText(text)
+
+    def blueprint_selected(self):
+        row = self.list.currentRow()
+        if not (0 <= row < len(self.programs)):
+            self.details.setPlainText(
+                "Selecciona primero un programa de la lista.")
+            return
+        path = self.programs[row]["path"]
+        try:
+            summary = blueprint_summary(path)
+        except (OSError, ValueError) as exc:
+            self.details.setPlainText(f"No se pudo generar el plan: {exc}")
+            return
+        self.details.setPlainText(summary["text"])
 
     def add_program(self):
         path, _ = QFileDialog.getOpenFileName(
