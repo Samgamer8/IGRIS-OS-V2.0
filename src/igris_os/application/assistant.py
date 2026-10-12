@@ -11,7 +11,7 @@ from igris_os.ai import ModelRouter, OllamaClient
 from igris_os.ai.orchestrator import ModelOrchestrator, ModelPurpose, ModelRoute
 from igris_os.application.director import MissionDirector
 from igris_os.application.intent_classifier import (
-    is_conversation_intent, normalize_intent,
+    is_conversation_intent, normalize_intent, _GREETING_CANNED,
 )
 from igris_os.domain import Mission, MissionBranch
 from igris_os.memory.compressor import ContextCompressor
@@ -343,6 +343,20 @@ class AssistantService:
                 'Esta peticion necesita un motor multimedia y una ejecucion real. '
                 'El chat no ha generado ni guardado ningun archivo; no voy a prometer una entrega desde esta respuesta.',
                 'local', backend='local', data={'requires_execution': True})
+
+        # Fast-path para saludos conocidos: sin llamar al LLM. Devuelve el texto
+        # preformateado inmediatamente y evita que el modelo se descargue de VRAM
+        # tras la inactividad, con lo que la respuesta y la voz son instantáneos.
+        if lower in (_GREETING_CANNED):
+            with open("runtime/logs/greeting_debug.log", "a", encoding="utf-8") as _dbg:
+
+                canned = _GREETING_CANNED[lower]
+
+            canned = _GREETING_CANNED[lower]
+            self.state.add_conversation_turn("user", objective.strip())
+            self.state.add_conversation_turn("assistant", canned)
+            data = self._model_route_data()
+            return AssistantReply(True, canned, "", 0, "local", data=data)
         if self._is_self_description_question(lower):
             text = (
                 "Soy IGRIS OS, un asistente local creado para conversar contigo y "

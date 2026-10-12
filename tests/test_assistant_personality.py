@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import Mock, patch
 
-from igris_os.application.assistant import AssistantService, PERSONALITY, SYSTEM
+from igris_os.application.assistant import AssistantService, ConversationState, PERSONALITY, SYSTEM
 from igris_os.application.intent_classifier import classify_intent
 from igris_os.application.delivery_request import requested_delivery
 
@@ -77,15 +77,31 @@ class AssistantPersonalityTests(unittest.TestCase):
     def test_chat_fails_clearly_without_a_resource_safe_model(self):
         assistant = AssistantService.__new__(AssistantService)
         assistant.client = Mock()
+        assistant.state = ConversationState()
         assistant.client.models.return_value = ()
         with patch.dict('os.environ', {'IGRIS_CONVERSATION_MODEL': ''}):
             with patch('igris_os.ai.resources.get_system_resources', return_value={
                 'ram_free_gb': 0.5, 'vram_free_gb': 0.0, 'uncertain': False,
             }):
-                reply = assistant.respond('Hola')
+                # El fast-path de saludo no necesita modelo: solo peticiones
+                # conversacionales reales deben fallar claramente sin modelo apto.
+                greeting = assistant.respond('Hola')
+        self.assertTrue(greeting.ok)
+        assistant.client.generate.assert_not_called()
+        # Una petición conversacional real (no saludo) sí falla claramente
+        # sin un modelo local apto.
+        assistant2 = AssistantService.__new__(AssistantService)
+        assistant2.client = Mock()
+        assistant2.state = ConversationState()
+        assistant2.client.models.return_value = ()
+        with patch.dict('os.environ', {'IGRIS_CONVERSATION_MODEL': ''}):
+            with patch('igris_os.ai.resources.get_system_resources', return_value={
+                'ram_free_gb': 0.5, 'vram_free_gb': 0.0, 'uncertain': False,
+            }):
+                reply = assistant2.respond('Cuéntame algo interesante.')
         self.assertFalse(reply.ok)
         self.assertIn('modelo local apto', reply.text)
-        assistant.client.generate.assert_not_called()
+        assistant2.client.generate.assert_not_called()
 
     def test_existing_model_is_kept_when_lightweight_model_is_missing(self):
         assistant = AssistantService.__new__(AssistantService)
