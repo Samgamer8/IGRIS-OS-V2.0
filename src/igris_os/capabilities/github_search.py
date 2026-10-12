@@ -102,13 +102,16 @@ def _search_once(query: str, top_n: int) -> RepoSearchResult:
 
 
 def search_repositories(query: str, *, top_n: int = 5) -> RepoSearchResult:
-    """Busqueda real con reintento honesto.
+    """Busqueda real con reduccion escalonada honesta.
 
-    Primero intenta con todos los terminos (AND implicito de GitHub). Si da
-    cero resultados (tipico cuando la frase traia un verbo o una palabra mal
-    escrita que GitHub no indexa), reintenta una sola vez con los terminos
-    unidos por OR, que es tolerante a ruido. Nunca inventa: si no hay nada,
-    devuelve total_count=0 real.
+    1) Intenta con todos los terminos (AND implicito de GitHub).
+    2) Si da cero resultados (la frase trajo verbos o una palabra mal escrita
+       que GitHub no indexa), recorta la consulta por la derecha --donde suelen
+       quedar verbos y conectores-- y reintenta, hasta obtener resultados reales
+       o quedarse con un solo termino.
+
+    Usa AND (no OR): OR con muchos terminos da HTTP 422. Nunca inventa: solo
+    prueba subconjuntos reales de lo que el usuario escribio.
     """
     query = query.strip()
     if not query:
@@ -117,13 +120,21 @@ def search_repositories(query: str, *, top_n: int = 5) -> RepoSearchResult:
     strict = _search_once(query, top_n)
     if strict.total_count > 0 or strict.error:
         return strict
-    # Reintento tolerante a ruido: OR entre terminos.
     terms = [t for t in query.split() if t]
-    if len(terms) > 1:
-        loose = _search_once(" OR ".join(terms), top_n)
-        if loose.total_count > 0:
-            return loose
-    return strict
+    # Recorte escalonado: quitar de a uno desde el final. Maximo 4 reintentos
+    # para no agotar la cuota (10 peticiones/hora sin token).
+    last = strict
+    for cut in range(1, min(len(terms), 5)):
+        candidate = " ".join(terms[:len(terms) - cut])
+        if not candidate:
+            break
+        attempt = _search_once(candidate, top_n)
+        if attempt.total_count > 0:
+            return attempt
+        if attempt.error:
+            return attempt  # red caida, 422, etc.: no seguir gastando cuota
+        last = attempt
+    return last
 
 
 def search_and_open(query: str, *, top_n: int = 5,
@@ -183,11 +194,20 @@ _FILLER = {
     "de", "del", "en", "la", "el", "los", "las", "un", "una", "unos", "unas",
     "para", "sobre", "que", "con", "y", "forma", "free", "gratis", "gratuito",
     "gratuita", "puedes", "podrias", "por", "favor", "dame", "muestrame",
-    "muestra", "encuentra", "encuentrame", "lista", "listado", "proyecto",
-    "proyectos", "codigo", "abierto", "abierta", "abiertos", "abiertas",
-    "necesito", "quiero", "hay", "existen",
+    "muestra", "muestrame", "muestras", "mostrarme", "mostrame", "mostrar",
+    "enseñame", "enseñar", "dime", "decir", "decirme", "encuentra",
+    "encuentrame", "encuentrame", "encontrar", "lista", "listado", "listame",
+    "listar", "proyecto", "proyectos", "codigo", "abierto", "abierta",
+    "abiertos", "abiertas", "necesito", "quiero", "hay", "existen", "exista",
     "ok", "okay", "ola", "hola", "ey", "eh", "bueno", "buena", "vale",
-    "mira", "oye", "dime", "decir",
+    "mira", "oye", "ver", "quiero", "gustaria", "quisiera", "podria",
+    # Cuantificadores / juicios de valor: no son terminos tecnicos.
+    "mas", "menos", "muy", "relevantes", "relevante", "importantes",
+    "importante", "principales", "principal", "mejores", "mejor", "buenos",
+    "buena", "buenas", "tipo", "tipos", "estilo", "ejemplo", "ejemplos",
+    "semejantes", "parecidos", "parecidas", "englovan", "envuelven",
+    "engloben", "engloban", "contengan", "tengan", "incluyan", "incluyen",
+    "utilicen", "usan", "usen", "relacionados", "relacionadas", "acerca",
 }
 _ES_EN = {
     "agentes": "agent", "agente": "agent", "multiples": "multi",
@@ -227,6 +247,44 @@ def extract_github_query(text: str) -> str:
             seen.add(translated)
             kept.append(translated)
     return " ".join(kept)
+
+
+# Terminos tecnicos fiables que GitHub indexa de forma consistente. Si la
+# frase contiene al menos uno, buscamos SOLO con estos (en ingles), ignorando
+# el ruido. Es lo unico que garantiza resultados reales con lenguaje natural.
+_TECH_TERMS = {
+    "agent", "agents", "multiagent", "multi", "ai", "llm", "llms", "nlp",
+    "gpt", "transformer", "transformers", "rag", "chatbot", "copilot",
+    "framework", "library", "sdk", "api", "cli", "tool", "tooling",
+    "application", "applications", "programming", "coding", "code",
+    "assistant", "ide", "editor", "extension", "plugin", "language",
+    "server", "servers", "language-server", "autonomous", "autonomy",
+    "selfhosted", "self-hosted", "openai", "anthropic", "claude", "qwen",
+    "llama", "mistral", "ollama", "deepseek", "huggingface", "langchain",
+    "crewai", "autogen", "browser", "desktop", "gui", "tui", "automation",
+    "workflow", "orchestration", "agentic", "developer", "devtools",
+    "video", "audio", "image", "vision", "speech", "voice", "tts", "stt",
+    "security", "database", "cloud", "kubernetes", "docker", "python",
+    "javascript", "typescript", "rust", "golang", "cpp", "scraper",
+    "scraping", "crawler", "rag", "embeddings", "finetuning", "inference",
+}
+
+
+def refine_query(raw_query: str) -> str:
+    """Prioriza terminos tecnicos fiables sobre el ruido residual.
+
+    Si hay terminos conocidos, devuelve solo esos (maximo 5, para no ahogar el
+    AND). Si no hay ninguno fiable, deja la consulta tal cual para que la
+    reduccion escalonada de search_repositories intente resolverla.
+    """
+    words = raw_query.split()
+    known = [w for w in words if w.lower() in _TECH_TERMS]
+    if known:
+        # Conserva el orden original, sin duplicados, maximo 5 terminos.
+        unique = list(dict.fromkeys(known))
+        return " ".join(unique[:5])
+    return raw_query
+
 
 def _default_opener(url: str) -> bool:
     from igris_os.capabilities.host import open_chrome_window

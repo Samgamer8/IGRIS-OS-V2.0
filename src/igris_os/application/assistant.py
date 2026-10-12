@@ -480,8 +480,8 @@ class AssistantService:
         ventana independiente de Chrome.
         """
         from igris_os.capabilities.github_search import (
-            extract_github_query, format_report, search_and_open)
-        query = extract_github_query(objective)
+            extract_github_query, format_report, refine_query, search_and_open)
+        query = refine_query(extract_github_query(objective))
         if not query:
             return AssistantReply(
                 True,

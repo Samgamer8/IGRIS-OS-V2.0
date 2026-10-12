@@ -12,7 +12,7 @@ from urllib.error import HTTPError
 from igris_os.capabilities import github_search
 from igris_os.capabilities.github_search import (
     RepoHit, RepoSearchResult, extract_github_query, format_report,
-    search_and_open, search_repositories,
+    refine_query, search_and_open, search_repositories,
 )
 
 
@@ -42,6 +42,24 @@ class TestQueryExtraction(unittest.TestCase):
 
     def test_empty_when_only_filler(self):
         self.assertEqual(extract_github_query("busca en github repositorios"), "")
+
+    def test_refine_keeps_only_known_tech_terms(self):
+        # "buscame" y "engloven" son ruido; quedan solo terminos fiables.
+        raw = "buscarme application engloven agent programming AI"
+        self.assertEqual(refine_query(raw), "application agent programming AI")
+
+    def test_refine_strips_technical_sentence_noise(self):
+        raw = "llm vs code cline cine freellmapi etc este application"
+        # "llm", "code", "application" sobreviven; "vs","cine","etc","este" no.
+        refined = refine_query(raw)
+        for junk in ("vs", "cine", "etc", "este", "freellmapi"):
+            self.assertNotIn(junk, refined.split())
+        self.assertIn("llm", refined)
+
+    def test_refine_leaves_unknown_untouched(self):
+        # Sin terminos conocidos, devuelve igual para que la reduccion decida.
+        self.assertEqual(refine_query("zorp blorptag"), "zorp blorptag")
+
 
 
 class TestSearchRepositories(unittest.TestCase):
