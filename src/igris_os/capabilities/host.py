@@ -28,6 +28,7 @@ def register_host_capabilities(registry):
         ("copy", "Copia un archivo a la ruta autorizada sin sobrescribir", copy_file, True),
         ("open", "Abre un archivo, carpeta o programa con Windows", open_path, True),
         ("open_url", "Abre una URL HTTPS de github.com en el navegador (solo lectura, bajo permiso)", open_url, True),
+        ("open_chrome_window", "Abre una URL HTTPS en una ventana independiente de Google Chrome (bajo permiso)", open_chrome_window, True),
     ):
         registry.register(CapabilitySpec(
             "host." + name, description,
@@ -224,6 +225,72 @@ def open_url(payload):
         os.startfile(raw)
         return ExecutionResult.success("Windows acepto la solicitud de apertura; no verifica el resultado del navegador",
                                        host_report={"url": raw, "opening_requested": True})
+    except (OSError, ValueError) as exc:
+        return _failure(exc)
+
+
+def _find_chrome() -> str | None:
+    """Localiza chrome.exe en rutas comunes y en el registro de Windows."""
+    if os.name != "nt":
+        return None
+    candidates = [
+        os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"),
+                     "Google", "Chrome", "Application", "chrome.exe"),
+        os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+                     "Google", "Chrome", "Application", "chrome.exe"),
+        os.path.join(os.environ.get("LOCALAPPDATA", ""),
+                     "Google", "Chrome", "Application", "chrome.exe"),
+    ]
+    for path in candidates:
+        if path and os.path.isfile(path):
+            return path
+    try:
+        import winreg
+        for hive, sub in (
+            (winreg.HKEY_LOCAL_MACHINE,
+             r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe"),
+            (winreg.HKEY_CURRENT_USER,
+             r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe"),
+        ):
+            try:
+                with winreg.OpenKey(hive, sub) as key:
+                    value, _ = winreg.QueryValueEx(key, "")
+                    if value and os.path.isfile(value):
+                        return value
+            except OSError:
+                continue
+    except Exception:
+        pass
+    return None
+
+
+def open_chrome_window(payload):
+    """Abre una URL HTTPS en una ventana INDEPENDIENTE de Google Chrome.
+
+    Usa ``chrome.exe --new-window`` para que cada repositorio se abra en su
+    propia ventana, en lugar de reutilizar una pestana del navegador por
+    defecto. Como lanza una aplicacion externa, queda marcada EXTERNAL y el
+    panel pide permiso antes de ejecutarla.
+    """
+    from urllib.parse import urlparse
+    try:
+        raw = str(payload.get("url", "") or "").strip().strip('"')
+        if not raw:
+            raise ValueError("Indica una URL https://...")
+        parsed = urlparse(raw)
+        if parsed.scheme != "https":
+            raise ValueError("Solo se abren URLs HTTPS")
+        if os.name != "nt":
+            return ExecutionResult.failure("Abrir Chrome requiere Windows",
+                                           "HOST_WINDOWS_REQUIRED")
+        chrome = _find_chrome()
+        if not chrome:
+            return ExecutionResult.failure("No se encontro Google Chrome instalado",
+                                           "HOST_CHROME_NOT_FOUND")
+        subprocess.Popen([chrome, "--new-window", raw])
+        return ExecutionResult.success(
+            "Ventana independiente de Chrome solicitada",
+            host_report={"url": raw, "chrome": chrome, "new_window": True})
     except (OSError, ValueError) as exc:
         return _failure(exc)
 

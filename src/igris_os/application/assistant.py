@@ -377,6 +377,8 @@ class AssistantService:
         if any(term in lower for term in exam_terms):
             text = self._tool_exam_status()
             return AssistantReply(True, text, "local", 0, "filesystem")
+        if self._is_github_repo_search(lower):
+            return self._handle_github_repo_search(objective)
         if self._is_conversation(lower):
             model = self._conversation_model()
             if not model:
@@ -455,6 +457,51 @@ class AssistantService:
                 normalized,
             )
         )
+
+    @staticmethod
+    def _is_github_repo_search(text: str) -> bool:
+        """Detecta peticiones de buscar repositorios en GitHub.
+
+        Requiere mencionar GitHub Y una intencion de buscar repositorios, para
+        no activarse con cualquier mencion a la palabra github.
+        """
+        lowered = text.lower()
+        mentions_github = "github" in lowered
+        wants_search = any(term in lowered for term in (
+            "repositorio", "repositorios", "repo ", "repos", "busca", "buscar",
+            "encuentra", "encontrar"))
+        return mentions_github and wants_search
+
+    def _handle_github_repo_search(self, objective: str) -> AssistantReply:
+        """Busqueda REAL en GitHub: cuenta, ordena por relevancia y abre el top-5.
+
+        No pasa por el LLM para evitar invenciones: la fuente de la verdad es
+        la API de GitHub. Cada uno de los 5 mas relevantes se abre en una
+        ventana independiente de Chrome.
+        """
+        from igris_os.capabilities.github_search import (
+            extract_github_query, format_report, search_and_open)
+        query = extract_github_query(objective)
+        if not query:
+            return AssistantReply(
+                True,
+                "No entendi que repositorios buscar en GitHub. "
+                "Dime el tema con palabras clave, por ejemplo: "
+                "«busca en github repositorios de agentes multiples».",
+                "local", 0, "local")
+        result, opened = search_and_open(query, top_n=5)
+        text = format_report(result, opened)
+        self.state.add_conversation_turn("user", objective.strip())
+        self.state.add_conversation_turn("assistant", text)
+        return AssistantReply(
+            result.error == "" and result.total_count > 0,
+            text, "github-api", 0, "github",
+            data={"github_search": {
+                "query": query,
+                "total_count": result.total_count,
+                "opened": opened,
+                "rate_limited": result.rate_limited,
+            }})
 
     def _conversation_model(self) -> str:
         """Treat the configured model as a preference subject to local limits."""
