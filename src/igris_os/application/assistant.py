@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from igris_os.ai import ModelRouter, OllamaClient
 from igris_os.ai.orchestrator import ModelOrchestrator, ModelPurpose, ModelRoute
 from igris_os.application.director import MissionDirector
+from igris_os.application.consent import ConsentGate
 from igris_os.application.intent_classifier import (
     is_conversation_intent, normalize_intent, _GREETING_CANNED,
 )
@@ -168,7 +169,21 @@ class AssistantService:
             # administracion se ejecutan mediante capabilities tipadas.
         }
         self.state = ConversationState()
+        self.consent = ConsentGate()
         self.on_tool_call = on_tool_call
+
+    def _consent_gate(self) -> ConsentGate:
+        """Devuelve el gate de consentimiento, creandolo si hace falta.
+
+        Tolerante a instancias creadas con ``__new__`` (que saltan ``__init__``
+        en algunos tests): garantiza que el flujo nunca rompe por falta de
+        atributo, sin obligar a construir el asistente completo.
+        """
+        gate = getattr(self, "consent", None)
+        if gate is None:
+            gate = ConsentGate()
+            self.consent = gate
+        return gate
 
     def choose_model(self, branch: MissionBranch,
                      objective: str = "") -> str:
@@ -334,6 +349,17 @@ class AssistantService:
     def respond(self, objective: str,
                 context: Tuple[str, ...] = ()) -> AssistantReply:
         self.last_model_route = None
+        # Si hay una propuesta de alto calado esperando, la respuesta del
+        # usuario se interpreta como si/no, no como una orden nueva. Asi el
+        # asistente pregunta y espera en vez de ejecutar a ciegas.
+        if self._consent_gate().has_pending():
+            outcome = self._consent_gate().resolve(objective)
+            text = outcome["reason"]
+            self.state.add_conversation_turn("user", objective.strip())
+            self.state.add_conversation_turn("assistant", text)
+            data = {"consent": {"decision": outcome["decision"],
+                                "action_id": outcome["proposal"].action_id}}
+            return AssistantReply(True, text, "", 0, "local", data=data)
         if not objective.strip():
             return AssistantReply(False, "Escribe una orden.", "", 0)
         lower = objective.strip().lower()
@@ -379,6 +405,9 @@ class AssistantService:
             return AssistantReply(True, text, "local", 0, "filesystem")
         if self._is_github_repo_search(lower):
             return self._handle_github_repo_search(objective)
+        consent_gate = self._maybe_request_consent(objective, lower)
+        if consent_gate is not None:
+            return consent_gate
         if self._is_conversation(lower):
             model = self._conversation_model()
             if not model:
@@ -502,6 +531,42 @@ class AssistantService:
                 "opened": opened,
                 "rate_limited": result.rate_limited,
             }})
+
+    # -- consentimiento explicito para pasos de alto calado --------------
+    # Palabras que senalan que el encargo toca el nucleo del sistema.
+    _CORE_WORDS = (
+        "kernel", "nucleo", "núcleo", "bootstrap", "arranque",
+        "fallbackchain", "fallback chain", "asistente real", "consent",
+    )
+    # Verbos de integracion fuerte: modifican codigo existente del nucleo.
+    _INTEGRATION_VERBS = (
+        "cablear", "cablea", "integrar", "integra", "implementar en",
+        "implementa en", "modificar el", "modifica el", "tocar el",
+    )
+
+    def _maybe_request_consent(self, objective: str,
+                               lower: str) -> Optional[AssistantReply]:
+        """Si el encargo toca el nucleo, pregunta antes de actuar.
+
+        Dispara si el texto menciona una pieza del nucleo (kernel, nucleo,
+        bootstrap, arranque, FallbackChain...) o un verbo de integracion
+        fuerte sobre el asistente. Devuelve el ``AssistantReply`` con la
+        pregunta, o ``None`` si debe seguir el flujo normal.
+        """
+        touches_core = any(term in lower for term in self._CORE_WORDS)
+        strong_verb = any(term in lower for term in self._INTEGRATION_VERBS)
+        if not (touches_core or strong_verb):
+            return None
+        text = self._consent_gate().propose(
+            "Quieres que cablee esto dentro del asistente real?",
+            "Encargo de alto calado: " + objective.strip()[:160],
+            risk="high", action_id="consent.high-impact")
+        self.state.add_conversation_turn("user", objective.strip())
+        self.state.add_conversation_turn("assistant", text)
+        return AssistantReply(
+            True, text, "", 0, "local",
+            data={"consent": {"decision": "pending",
+                              "action_id": "consent.high-impact"}})
 
     def _conversation_model(self) -> str:
         """Treat the configured model as a preference subject to local limits."""
