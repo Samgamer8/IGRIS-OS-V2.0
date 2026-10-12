@@ -265,9 +265,52 @@ class OllamaServer:
         return self.is_running() or self.start()
 
 
+def _probe_vram_free_mib() -> int | None:
+    """VRAM libre en MiB (GPU con mas memoria disponible), o None si no se mide."""
+    try:
+        result = subprocess.run(
+            ['nvidia-smi', '--query-gpu=memory.free', '--format=csv,noheader,nounits'],
+            capture_output=True, text=True, timeout=2, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        values = [int(line.strip()) for line in result.stdout.splitlines()
+                  if line.strip().isdigit()]
+    except ValueError:
+        return None
+    return max(values) if values else None
+
+
+def _llama_context_size(requested: int | None = None) -> int:
+    """Contexto nativo (tokens) valido para arrancar llama-server.
+
+    - ``requested`` explicito y en rango (4096..32768): se respeta tal cual.
+    - Sin medida fiable de VRAM: se conserva el minimo seguro (4096).
+    - Con VRAM medida: escalera auto-ajustada. En una GPU de 8 GB con flash-attn
+      y KV q8_0 esto eleva el contexto muy por encima del antiguo 4096 fijo,
+      respetando siempre una reserva de seguridad.
+    """
+    if requested:
+        if not 4096 <= int(requested) <= 32768:
+            raise ValueError('native_context_size fuera de rango (4096..32768)')
+        return int(requested)
+    free = _probe_vram_free_mib()
+    if free is None:
+        return 4096
+    # Requisito conservador por nivel: pesos Q4 de un modelo de 7B + KV q8_0
+    # del contexto (flash-attn activo) + reserva de seguridad de la GPU.
+    for size, requirement in ((32768, 7400), (16384, 6200), (8192, 5400)):
+        if free >= requirement:
+            return size
+    return 4096
+
+
 class LlamaCppServer(OllamaServer):
     def __init__(self, executable: Path, model: Path, endpoint: str,
-                 alias: str = 'qwen2.5-coder:7b', idle_seconds: int = 180):
+                 alias: str = 'qwen2.5-coder:7b', idle_seconds: int = 180,
+                 context_size: int | None = None):
         from igris_os.ai.ollama import _is_loopback_endpoint
 
         if not _is_loopback_endpoint(endpoint):
@@ -279,6 +322,7 @@ class LlamaCppServer(OllamaServer):
         self.endpoint = endpoint.rstrip('/')
         self.alias = alias
         self.idle_seconds = idle_seconds
+        self.context_size = context_size
         self._proc = None
 
     def is_running(self) -> bool:
@@ -293,9 +337,10 @@ class LlamaCppServer(OllamaServer):
             if model_file.read(4) != b'GGUF':
                 return False
         address = urlsplit(self.endpoint)
+        context_size = _llama_context_size(self.context_size)
         command = [str(self.executable), '--model', str(self.model), '--alias', self.alias,
                    '--host', address.hostname, '--port', str(address.port or 80),
-                   '--ctx-size', '4096', '--parallel', '1', '--n-gpu-layers', '99',
+                   '--ctx-size', str(context_size), '--parallel', '1', '--n-gpu-layers', '99',
                    '--cache-type-k', 'q8_0', '--cache-type-v', 'q8_0', '--flash-attn', 'on',
                    '--threads', str(min(os.cpu_count() or 4, 8)),
                    '--sleep-idle-seconds', str(self.idle_seconds), '--no-webui',
@@ -305,6 +350,13 @@ class LlamaCppServer(OllamaServer):
         with log.open('a', encoding='utf-8') as output:
             self._proc = subprocess.Popen(command, stdout=output, stderr=output,
                                           creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        try:
+            from igris_os.ai.resources import govern_server_process
+            if self._proc.pid:
+                govern_server_process(self._proc.pid, priority="high")
+        except Exception:
+            # La gobernanza es opcional: nunca debe impedir el arranque.
+            pass
         deadline = time.monotonic() + wait
         while time.monotonic() < deadline:
             if self._proc.poll() is not None:
@@ -348,10 +400,15 @@ def ensure_ollama_server(auto: bool = False) -> bool:
 
                 if _GLOBAL_SERVER is not None:
                     _GLOBAL_SERVER.stop()
+                try:
+                    native_ctx = int(os.environ.get('IGRIS_NATIVE_CONTEXT_SIZE', '0')) or None
+                except ValueError:
+                    native_ctx = None
                 _GLOBAL_SERVER = LlamaCppServer(
                     Path(native_executable), Path(native_model), _openai_endpoint_from_env(),
                     os.environ.get('IGRIS_NATIVE_MODEL_ALIAS', 'qwen2.5-coder:7b'),
-                    int(os.environ.get('IGRIS_NATIVE_IDLE_SECONDS', '180')))
+                    int(os.environ.get('IGRIS_NATIVE_IDLE_SECONDS', '180')),
+                    context_size=native_ctx)
             started = _GLOBAL_SERVER.start()
             if started:
                 server_pid = _GLOBAL_SERVER._proc.pid if _GLOBAL_SERVER._proc is not None else None

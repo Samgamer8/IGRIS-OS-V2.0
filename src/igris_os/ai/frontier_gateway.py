@@ -27,6 +27,7 @@ from .ollama import ModelReply, OllamaClient
 
 KIMI_ALIAS = "moonshot/kimi-k3"
 XINFERENCE_PREFIX = "xinference/"
+REMOTE_OPENAI_PREFIX = "remote-openai/"
 
 
 def _truthy(value: str | None) -> bool:
@@ -112,6 +113,8 @@ class FrontierGateway:
         self.context_window = 32768
         self._xin_cache: tuple[str, ...] = ()
         self._xin_cache_at = 0.0
+        self._remote_cache: tuple[str, ...] = ()
+        self._remote_cache_at = 0.0
 
     # ------------------------------------------------------------------
     # Discovery / routing
@@ -121,6 +124,7 @@ class FrontierGateway:
         if self._cloud_enabled() and os.environ.get("MOONSHOT_API_KEY", "").strip():
             names.append(KIMI_ALIAS)
         names.extend(self._xinference_models())
+        names.extend(self._remote_openai_models())
         return tuple(dict.fromkeys(name for name in names if name))
 
     def list_models(self) -> list[str]:
@@ -133,6 +137,9 @@ class FrontierGateway:
             result.append(("xinference", endpoint))
         if self._cloud_enabled() and os.environ.get("MOONSHOT_API_KEY", "").strip():
             result.append(("moonshot", "https://api.moonshot.ai/v1"))
+        endpoint, _api_key = self._remote_openai_config()
+        if endpoint and self._remote_openai_models():
+            result.append(("remote-openai", endpoint))
         return tuple(result)
 
     @staticmethod
@@ -177,6 +184,55 @@ class FrontierGateway:
         self._xin_cache_at = now
         return self._xin_cache
 
+    @staticmethod
+    def _remote_openai_config() -> tuple[str, str]:
+        """Require opt-in, HTTPS and an auth token before contacting a remote server."""
+        enabled = _truthy(os.environ.get("IGRIS_ALLOW_REMOTE_MODELS"))
+        endpoint = os.environ.get("IGRIS_REMOTE_OPENAI_ENDPOINT", "").strip().rstrip("/")
+        api_key = os.environ.get("IGRIS_REMOTE_OPENAI_API_KEY", "").strip()
+        if not enabled or not endpoint or not api_key:
+            return "", ""
+        try:
+            parsed = urlsplit(endpoint)
+            valid_port = parsed.port is None or 1 <= parsed.port <= 65535
+            valid_path = parsed.path.rstrip("/").endswith("/v1")
+            if (parsed.scheme != "https" or not parsed.hostname or not valid_port
+                    or not valid_path or parsed.username or parsed.password
+                    or parsed.query or parsed.fragment):
+                return "", ""
+        except ValueError:
+            return "", ""
+        return endpoint, api_key
+
+    def _remote_openai_models(self) -> tuple[str, ...]:
+        now = time.monotonic()
+        if now - self._remote_cache_at < 10:
+            return self._remote_cache
+        endpoint, api_key = self._remote_openai_config()
+        if not endpoint:
+            self._remote_cache = ()
+            self._remote_cache_at = now
+            return ()
+        try:
+            data = self._request_json(
+                "GET", endpoint + "/models",
+                headers={"Authorization": "Bearer " + api_key},
+                timeout=min(self.timeout, 1.5))
+        except (OSError, ValueError, urllib.error.URLError):
+            self._remote_cache = ()
+            self._remote_cache_at = now
+            return ()
+        items = data.get("data", []) if isinstance(data, dict) else []
+        models = []
+        for item in items if isinstance(items, list) else []:
+            if isinstance(item, Mapping):
+                model = str(item.get("id") or item.get("model") or "").strip()
+                if model:
+                    models.append(REMOTE_OPENAI_PREFIX + model)
+        self._remote_cache = tuple(dict.fromkeys(models))
+        self._remote_cache_at = now
+        return self._remote_cache
+
     # ------------------------------------------------------------------
     # Drop-in generation API
     # ------------------------------------------------------------------
@@ -185,7 +241,7 @@ class FrontierGateway:
             return self._remote_generate(
                 prompt, model, structured_schema=None,
                 reasoning_effort="high" if thinking else "low")
-        if model.startswith(XINFERENCE_PREFIX):
+        if model.startswith((XINFERENCE_PREFIX, REMOTE_OPENAI_PREFIX)):
             return self._remote_generate(
                 prompt, model, structured_schema=None,
                 reasoning_effort="high" if thinking else "low")
@@ -193,7 +249,7 @@ class FrontierGateway:
         return self.local.generate(prompt, model, thinking=thinking)
 
     def generate_json(self, prompt: str, model: str, schema: dict) -> ModelReply:
-        if self._is_kimi(model) or model.startswith(XINFERENCE_PREFIX):
+        if self._is_kimi(model) or model.startswith((XINFERENCE_PREFIX, REMOTE_OPENAI_PREFIX)):
             effort = self._reasoning_effort(prompt, schema)
             return self._remote_generate(
                 prompt, model, structured_schema=schema,
@@ -311,7 +367,7 @@ class FrontierGateway:
                   tools: Sequence[Mapping[str, Any]] = (),
                   tool_choice: str | Mapping[str, Any] | None = None,
                   reasoning_effort: str = "high") -> FrontierTurn:
-        if not (self._is_kimi(model) or model.startswith(XINFERENCE_PREFIX)):
+        if not (self._is_kimi(model) or model.startswith((XINFERENCE_PREFIX, REMOTE_OPENAI_PREFIX))):
             return FrontierTurn(False, "", model, "local", error=(
                 "El tool-calling nativo requiere un backend OpenAI-compatible configurado; "
                 "las misiones locales usan el contrato JSON seguro de IGRIS."))
@@ -368,6 +424,11 @@ class FrontierGateway:
         if model.startswith(XINFERENCE_PREFIX):
             remote = model[len(XINFERENCE_PREFIX):]
             return "xinference", self._xinference_endpoint(), remote, ""
+        if model.startswith(REMOTE_OPENAI_PREFIX):
+            endpoint, api_key = self._remote_openai_config()
+            remote = model[len(REMOTE_OPENAI_PREFIX):]
+            return ("remote-openai", endpoint, remote, api_key) if endpoint else (
+                "remote-openai", "", remote, "")
         return "", "", model, ""
 
     @staticmethod

@@ -26,14 +26,33 @@ def route_frame(frame: IntentFrame, objective: str, attachments: Sequence[str] =
     if neural:
         return neural
 
-    if frame.domain == "conversation" or frame.intent in {"chat", "explain"}:
+    if frame.domain == "conversation" and frame.intent in {"chat", "explain"}:
         return RoutedAction("chat")
+
+    # Un frame contradictorio nunca debe borrar una orden operativa ni
+    # transformarla en una respuesta conversacional sin ejecutar.
+    if frame.intent in {"chat", "explain"}:
+        return RoutedAction("clarify", payload={
+            "question": (
+                "La intención quedó etiquetada como conversación aunque el dominio "
+                "indica una tarea. Voy a detener la ruta para evitar una respuesta "
+                "que prometa trabajo sin iniciarlo. Reformula la orden concreta."
+            )
+        })
+
+    if frame.domain == "conversation":
+        return RoutedAction("clarify", payload={
+            "question": "La intención y el dominio no coinciden. Reformula la petición para poder clasificarla con seguridad."
+        })
 
     if frame.domain == "capability" or frame.intent == "capability_query":
         return RoutedAction("capability", "system.capabilities", {"objective": objective})
 
     if frame.domain == "programming":
         roots = _existing_directory_sources(objective, attachments)
+        from igris_os.application.delivery_request import requested_delivery
+        contract = requested_delivery(objective)
+        destination = str(contract.get("destination") or "").strip()
         if not roots and str(frame.target or "").strip():
             roots = _existing_directory_sources(str(frame.target), ())
 
@@ -55,7 +74,28 @@ def route_frame(frame: IntentFrame, objective: str, attachments: Sequence[str] =
             "semantic_goal": frame.goal,
             "requires_existing": frame.intent in _PROGRAMMING_EXISTING,
         }
-        if roots:
+        if destination:
+            destination_path = Path(destination).expanduser()
+            destination_key = str(destination_path.resolve()).casefold()
+            source_roots = [
+                root for root in roots
+                if str(Path(root).resolve()).casefold() != destination_key
+            ]
+            payload["destination"] = destination
+            payload["delivery_contract"] = contract
+            if destination_path.is_dir():
+                # An existing, explicitly named output folder is the project
+                # being built/updated. The other supplied folder is reference
+                # material; never patch the original game by path order alone.
+                payload["root"] = str(destination_path.resolve())
+                payload["requires_existing"] = True
+            else:
+                # New output: start a clean project and expose the original as
+                # read-only resources for inspection.
+                payload["requires_existing"] = False
+            if source_roots:
+                payload["resource_roots"] = source_roots[:4]
+        elif roots:
             payload["root"] = roots[0]
             payload["requires_existing"] = True
             if len(roots) > 1:

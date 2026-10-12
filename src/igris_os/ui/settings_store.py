@@ -25,6 +25,7 @@ DEFAULTS: dict[str, Any] = {
     "native_model_path": "",
     "native_model_alias": "qwen2.5-coder:7b",
     "native_idle_seconds": 180,
+    "native_context_size": 0,
 }
 
 logger = logging.getLogger(__name__)
@@ -75,7 +76,8 @@ def apply_ai_settings(settings: dict[str, Any]) -> str:
         raise ValueError('Motor preferido invalido')
     os.environ['IGRIS_PREFERRED_BACKEND'] = preferred
     os.environ['IGRIS_EXCLUSIVE_BACKEND'] = str(bool(settings.get('exclusive_backend', False))).lower()
-    for key in ('native_executable', 'native_model_path', 'native_model_alias', 'native_idle_seconds'):
+    for key in ('native_executable', 'native_model_path', 'native_model_alias', 'native_idle_seconds',
+                'native_context_size'):
         os.environ['IGRIS_' + key.upper()] = str(settings.get(key, DEFAULTS[key]) or '')
     try:
         from igris_os.ai import ollama as ollama_mod

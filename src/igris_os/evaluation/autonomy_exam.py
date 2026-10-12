@@ -6,6 +6,7 @@ from pathlib import Path
 import time
 
 from igris_os.ai import OllamaClient
+from igris_os.ai.frontier_gateway import FrontierGateway
 from igris_os.ai.model_selection import coding_model_candidates
 from igris_os.programming.mission_team import ProgrammingTeam
 from igris_os.programming.mission_delivery import deliver_programming
@@ -69,14 +70,15 @@ def test_add_valid_item(tmp_path):
 }
 
 
-def run_autonomy_exam(client, workspace, *, model='', max_calls=40, on_progress=None,
-                      team_factory=ProgrammingTeam):
+def run_autonomy_exam(client, workspace, *, model='', max_calls=40, max_seconds=1800,
+                      on_progress=None, team_factory=ProgrammingTeam):
     workspace = Path(workspace).resolve()
     if workspace.exists():
         raise ValueError('El examen necesita una carpeta nueva para conservar la evidencia anterior')
     workspace.mkdir(parents=True)
     started = time.monotonic()
-    live = type(client) is OllamaClient and team_factory is ProgrammingTeam
+    live_client = type(client) in {OllamaClient, FrontierGateway}
+    live = live_client and team_factory is ProgrammingTeam
     report = {'schema': 1, 'status': 'running', 'scope': 'repository_inventory',
         'started_at': datetime.now(timezone.utc).isoformat(),
         'execution_mode': 'live_local_backend' if live else 'test_fixture',
@@ -86,12 +88,18 @@ def run_autonomy_exam(client, workspace, *, model='', max_calls=40, on_progress=
     save_json(Path(report['report']), report)
     team = None
     try:
-        models = client.models()
+        models = tuple(client.models())
         report['available_models'] = list(models)
-        selected = coding_model_candidates(models, model)
+        local_models = tuple(name for name in models if not str(name).casefold().startswith(
+            ('moonshot/', 'kimi-', 'xinference/', 'remote-openai/'))
+            and ':cloud' not in str(name).casefold())
+        report['local_models'] = list(local_models)
+        selected = coding_model_candidates(local_models, model)
         if not selected:
             raise ValueError('No hay modelos de programacion accesibles en un backend local')
-        if ':cloud' in selected[0].casefold():
+        if (':cloud' in selected[0].casefold()
+                or selected[0].casefold().startswith(
+                    ('moonshot/', 'kimi-', 'xinference/', 'remote-openai/'))):
             raise ValueError('Este examen requiere un modelo local, no un modelo cloud')
         report['selected_model'] = selected[0]
         original = workspace / 'input_repository'
@@ -115,7 +123,7 @@ def run_autonomy_exam(client, workspace, *, model='', max_calls=40, on_progress=
                 'output': checked.get('external', {}).get('process', {}).get('output', '')[-9000:]}
 
         team = team_factory(client, workspace / 'mission', preferred_model=selected[0],
-            max_calls=max_calls, max_seconds=1800, on_progress=on_progress,
+            max_calls=max_calls, max_seconds=max_seconds, on_progress=on_progress,
             acceptance_check=external_check)
         result = team.execute(CONTRACTS['repository_inventory'], source=original)
         report['mission'] = {'ok': result.ok, 'message': result.message, 'data': result.data}

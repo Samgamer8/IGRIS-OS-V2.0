@@ -63,10 +63,34 @@ def _executable_requested(objective):
     return False
 
 
+def _explicit_destination(objective):
+    """Return a user-labeled absolute output folder without guessing from path order."""
+    pattern = re.compile(
+        r'`{1,3}([^`\r\n]+)`{1,3}|["“]([^"“”]+)["”]'
+        r'|(?<![\w])([A-Za-z]:[\\/][^\r\n`"“”<>|]+)')
+    marker = re.compile(
+        r'\b(?:carpeta\s+(?:de\s+)?destino|directorio\s+(?:de\s+)?destino|'
+        r'destino|guardar(?:lo)?\s+en|guarda(?:r|lo)?\s+en|'
+        r'pon(?:lo)?\s+en|coloca(?:r|lo)?\s+en|entrega(?:r)?\s+en|'
+        r'en\s+esta\s+(?:carpeta|ubicacion))\b[^\r\n]{0,100}$')
+    for match in pattern.finditer(str(objective or '')):
+        raw = next((group for group in match.groups() if group is not None), '')
+        candidate = raw.strip().strip("' .,;!?")
+        if not re.match(r'^(?:[A-Za-z]:[\\/]|/)', candidate):
+            continue
+        prefix = _normalize_intent(objective[max(0, match.start() - 140):match.start()])
+        if marker.search(prefix):
+            return candidate
+    return ''
+
+
 def requested_delivery(objective):
     normalized = _normalize_intent(objective)
-    desktop = 'escritorio' in normalized.split()
+    # ``Escritorio`` dentro de una ruta Windows no significa que el usuario
+    # haya pedido crear el resultado en el escritorio.
+    desktop = bool(re.search(r'\b(?:en|al|hacia el)\s+escritorio\b', normalized))
     executable = _executable_requested(objective)
+    explicit_destination = _explicit_destination(objective)
     match = re.search(r'\b(?:nombre(?:\s+de)?|llamad[oa])\s*[,;:\-]*\s*(.+)', objective, re.I)
     name = ''
     if match:
@@ -85,11 +109,14 @@ def requested_delivery(objective):
                 safe_relative(name)
             except ValueError:
                 name = ''
-    if not (desktop or executable or name):
+    if not (desktop or executable or name or explicit_destination):
         return {}
     contract = {'name': name, 'location': 'desktop' if desktop else '',
                 'requires_executable': executable, 'executable_name': name + '.exe' if name and executable else ''}
-    if desktop and name:
+    if explicit_destination:
+        contract['destination'] = explicit_destination
+        contract['location'] = 'explicit'
+    elif desktop and name:
         parent = desktop_directory()
         contract['destination'] = str(parent / name) if parent else ''
     return contract

@@ -55,3 +55,11 @@ desktop.ini
 .freebuff/
 .kilo/
 .playwright-mcp/
+
+# --- Volcados y artefactos de depuracion en la raiz (no son fuente) ---
+arbol.txt
+resumen.txt
+*.log
+*.bak
+.pytest_cache_run*/
+

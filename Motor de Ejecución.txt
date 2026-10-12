@@ -1,0 +1,23 @@
+import os
+import time
+import requests
+
+# Configuración del entorno
+PROYECTO_DIR = r"C:\Users\samva\OneDrive\Escritorio\IGRIS OS"
+API_URL = "http://localhost:3001/v1/chat/completions" # Tu FreeLLMAPI
+
+print("[SISTEMA] Motor de Ejecución de Igris OS Activado.")
+print("[SISTEMA] Esperando órdenes del Gestor Autónomo...\n")
+
+def ejecutar_comando_igris(script_contenido):
+    try:
+        # Ejecuta el código de automatización que dicte la IA
+        exec(script_contenido, {'proyecto_dir': PROYECTO_DIR, 'os': os})
+        return "ÉXITO: Tarea ejecutada físicamente en Windows."
+    except Exception as e:
+        return f"ERROR DE EJECUCIÓN: {str(e)}"
+
+# Bucle que mantiene a Igris conectado a tu Windows
+while True:
+    # Aquí Igris OS leerá las tareas pendientes y las ejecutará en tu disco duro
+    time.sleep(5)

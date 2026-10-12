@@ -53,17 +53,26 @@ class MultiLanguageCoordinator:
             '{"source":"Main.java","tests":"MainTest.java","pom":"...","explanation":"cambios"}. Sin markdown.'
         ),
         Language.GDSCRIPT: (
-            "Eres programador Godot senior. Genera scripts GDScript con escena de prueba. "
+            "Eres programador Godot senior. Genera un proyecto ejecutable y pruebas reales. "
+            "El test_runner.gd debe extender SceneTree, ejecutar casos que comprueben el "
+            "comportamiento de main.gd, terminar con quit(1) si algo falla y escribir "
+            "IGRIS_TESTS_PASSED solo despues de que todos los casos pasen. "
             "Devuelve SOLO JSON: "
-            '{"source":"main.gd","scene":"test.tscn","explanation":"cambios"}. Sin markdown.'
+            '{"source":"main.gd","tests":"test_runner.gd","scene":"test.tscn",'
+            '"project":"project.godot","explanation":"cambios"}. Sin markdown.'
         ),
         Language.TYPESCRIPT: (
-            "Eres programador TypeScript senior. Genera codigo tipado con tests Jest. "
+            "Eres programador TypeScript senior para Node.js 24 o posterior. "
+            "Genera TypeScript con sintaxis eliminable por Node (sin enum, namespace "
+            "ni parameter properties) y tests usando node:test y node:assert/strict. "
+            "El package.json debe declarar type=module. No uses paquetes externos "
+            "ni dependencias que haya que instalar. "
             "Devuelve SOLO JSON: "
             '{"source":"main.ts","tests":"main.test.ts","package":"...","explanation":"cambios"}. Sin markdown.'
         ),
         Language.JAVASCRIPT: (
-            "Eres programador JavaScript senior. Genera codigo con tests Jest. "
+            "Eres programador JavaScript senior para Node.js. Usa node:test y "
+            "node:assert/strict; no añadas dependencias externas. "
             "Devuelve SOLO JSON: "
             '{"source":"main.js","tests":"main.test.js","package":"...","explanation":"cambios"}. Sin markdown.'
         ),
@@ -177,7 +186,10 @@ class MultiLanguageCoordinator:
                            ("cmake", "--build", "build"),
                            ("ctest", "--test-dir", "build", "--output-on-failure", "--no-tests=error")],
             Language.JAVA: [("mvn", "--offline", "-DfailIfNoTests=true", "test")],
-            Language.JAVASCRIPT: [("node", "--test", "src/main.test.js")],
+            Language.GDSCRIPT: [("godot", "--headless", "--path", ".", "--script", "tests/test_runner.gd")],
+            Language.TYPESCRIPT: [("node", "--experimental-strip-types", "--test",
+                                   "--test-reporter=tap", "src/main.test.ts")],
+            Language.JAVASCRIPT: [("node", "--test", "--test-reporter=tap", "src/main.test.js")],
         }.get(language)
         if not commands:
             self._last_diagnostic = "Sin verificador de pruebas para esta ruta; usa la capacidad especifica del lenguaje"
@@ -198,7 +210,11 @@ class MultiLanguageCoordinator:
         if language == Language.RUST:
             return bool(re.search(r"running [1-9][0-9]* tests?", output))
         if language == Language.JAVASCRIPT:
-            return bool(re.search(r"(?:# |ℹ )pass [1-9][0-9]*", output))
+            return bool(re.search(r"# pass [1-9][0-9]*", output))
+        if language == Language.TYPESCRIPT:
+            return bool(re.search(r"# pass [1-9][0-9]*", output))
+        if language == Language.GDSCRIPT:
+            return "IGRIS_TESTS_PASSED" in output and "SCRIPT ERROR" not in output
         return True
 
     def _verify_python(self, implementation: dict,
@@ -261,7 +277,8 @@ class MultiLanguageCoordinator:
             Language.RUST: [("source", "src/main.rs"), ("tests", "tests/tests.rs"), ("cargo", "Cargo.toml")],
             Language.CPP: [("source", "src/main.cpp"), ("tests", "tests/test_main.cpp"), ("cmake", "CMakeLists.txt")],
             Language.JAVA: [("source", "src/main/java/Main.java"), ("tests", "src/test/java/MainTest.java"), ("pom", "pom.xml")],
-            Language.GDSCRIPT: [("source", "main.gd"), ("scene", "test.tscn"), ("project", "project.godot")],
+            Language.GDSCRIPT: [("source", "main.gd"), ("tests", "tests/test_runner.gd"),
+                                ("scene", "test.tscn"), ("project", "project.godot")],
             Language.TYPESCRIPT: [("source", "src/main.ts"), ("tests", "src/main.test.ts"), ("package", "package.json")],
             Language.JAVASCRIPT: [("source", "src/main.js"), ("tests", "src/main.test.js"), ("package", "package.json")],
         }

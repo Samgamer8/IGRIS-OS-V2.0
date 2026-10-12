@@ -70,9 +70,9 @@ class MultiLanguageVerifier:
         ),
         Language.JAVA: LanguageProfile(
             Language.JAVA, (".java",),
-            test_command=("mvn", "test", "-q"),
-            build_command=("mvn", "compile", "-q"),
-            lint_command=("mvn", "checkstyle:check", "-q"),
+            test_command=("mvn", "--offline", "-DfailIfNoTests=true", "test", "-q"),
+            build_command=("mvn", "--offline", "compile", "-q"),
+            lint_command=("mvn", "--offline", "checkstyle:check", "-q"),
         ),
         Language.GDSCRIPT: LanguageProfile(
             Language.GDSCRIPT, (".gd",),
@@ -83,15 +83,15 @@ class MultiLanguageVerifier:
         ),
         Language.TYPESCRIPT: LanguageProfile(
             Language.TYPESCRIPT, (".ts",),
-            test_command=("npx", "jest", "--silent"),
-            build_command=("npx", "tsc", "--noEmit"),
-            lint_command=("npx", "eslint", "src"),
+            test_command=(),
+            build_command=None,
+            lint_command=None,
         ),
         Language.JAVASCRIPT: LanguageProfile(
             Language.JAVASCRIPT, (".js",),
-            test_command=("npx", "jest", "--silent"),
-            build_command=("node", "--check", "src"),
-            lint_command=("npx", "eslint", "src"),
+            test_command=(),
+            build_command=None,
+            lint_command=None,
         ),
     }
 
@@ -127,7 +127,7 @@ class MultiLanguageVerifier:
         if "project.godot" in files or ".gd" in suffixes:
             candidates.append((Language.GDSCRIPT, ("project.godot",), "godot", False))
         if "package.json" in files and ".ts" in suffixes:
-            candidates.append((Language.TYPESCRIPT, ("package.json",), "npx", True))
+            candidates.append((Language.TYPESCRIPT, ("package.json",), "node", False))
         elif "package.json" in files and ".js" in suffixes:
             candidates.append((Language.JAVASCRIPT, ("package.json",), "node", False))
         return tuple(
@@ -153,6 +153,25 @@ class MultiLanguageVerifier:
         return VerificationResult(True, "Python OK", Language.PYTHON)
 
     def _verify_toolchain(self, path: Path, profile: LanguageProfile) -> VerificationResult:
+        if profile.language in {Language.TYPESCRIPT, Language.JAVASCRIPT}:
+            relative = self._relative_project_path(path)
+            if relative is None:
+                return VerificationResult(False, "El archivo queda fuera del proyecto", profile.language)
+            command = (("node", "--experimental-strip-types", "--check", relative)
+                       if profile.language == Language.TYPESCRIPT
+                       else ("node", "--check", relative))
+            ok, msg, code, out, err = self._run(command, cwd=self.root)
+            return VerificationResult(
+                ok, "Sintaxis Node OK" if ok else f"Sintaxis Node: {msg}",
+                profile.language, code, out, err)
+        if profile.language == Language.GDSCRIPT:
+            command = ("godot", "--headless", "--path", ".", "--editor", "--quit")
+            ok, msg, code, out, err = self._run(command, cwd=self.root)
+            diagnostic = out + "\n" + err
+            ok = ok and "SCRIPT ERROR" not in diagnostic and "Parse Error" not in diagnostic
+            return VerificationResult(
+                ok, "Parseo Godot OK" if ok else f"Parseo Godot: {msg or 'error de script'}",
+                profile.language, code, out, err)
         if profile.lint_command:
             ok, msg, code, out, err = self._run(profile.lint_command, cwd=self.root)
             if not ok:
@@ -164,6 +183,12 @@ class MultiLanguageVerifier:
                 return VerificationResult(False, f"Build: {msg}", profile.language,
                                           code, out, err)
         return VerificationResult(True, f"{profile.language.value} verificado", profile.language)
+
+    def _relative_project_path(self, path: Path) -> str | None:
+        try:
+            return path.resolve().relative_to(self.root).as_posix()
+        except (OSError, ValueError):
+            return None
 
     def _run(self, cmd: Sequence[str], *, cwd: Path) -> tuple[bool, str, int, str, str]:
         try:
@@ -214,18 +239,59 @@ class UniversalQualityGate:
 
     def _run_tests(self, path: Path, language: Language) -> VerificationResult:
         profile = MultiLanguageVerifier.PROFILES[language]
+        if language in {Language.TYPESCRIPT, Language.JAVASCRIPT}:
+            extension = "*.test.ts" if language == Language.TYPESCRIPT else "*.test.js"
+            alternate = "*.spec.ts" if language == Language.TYPESCRIPT else "*.spec.js"
+            tests = self._find_tests((extension, alternate), ("node_modules", ".git", ".venv", "dist", "build"))
+            if not tests:
+                return VerificationResult(False, "No se encontraron pruebas ejecutables", language)
+            command = ["node"]
+            if language == Language.TYPESCRIPT:
+                command.append("--experimental-strip-types")
+            command.extend(("--test", "--test-reporter=tap"))
+            command.extend(path.relative_to(self.workspace).as_posix() for path in tests)
+            ok, msg, code, out, err = self.verifier._run(command, cwd=self.workspace)
+            passed = bool(__import__("re").search(r"# pass [1-9][0-9]*", out))
+            if not ok or not passed:
+                return VerificationResult(False, f"Tests fallidos: {msg or 'no hubo pruebas aprobadas'}",
+                                          language, code, out, err)
+            return VerificationResult(True, "Tests Node OK", language, code, out, err)
+        if language == Language.GDSCRIPT:
+            tests = self._find_tests(("test_runner.gd", "test_*.gd", "*_test.gd"),
+                                     (".godot", ".git", "addons"))
+            if not tests:
+                return VerificationResult(False, "No se encontró un ejecutor de pruebas GDScript", language)
+            outputs = []
+            for test_file in tests:
+                relative = test_file.relative_to(self.workspace).as_posix()
+                command = ("godot", "--headless", "--path", ".", "--script", relative)
+                ok, msg, code, out, err = self.verifier._run(command, cwd=self.workspace)
+                outputs.append(out + "\n" + err)
+                if not ok or "IGRIS_TESTS_PASSED" not in out or "SCRIPT ERROR" in (out + err):
+                    return VerificationResult(False, f"Tests GDScript fallidos: {msg}",
+                                              language, code, out, err)
+            return VerificationResult(True, "Tests GDScript OK", language,
+                                      stdout="\n".join(outputs))
         if not profile.test_command:
-            return VerificationResult(True, "Sin tests", language)
+            return VerificationResult(False, "No hay un ejecutor de pruebas configurado", language)
         ok, msg, code, out, err = self.verifier._run(profile.test_command, cwd=self.workspace)
         if not ok:
             return VerificationResult(False, f"Tests fallidos: {msg}", language,
                                       code, out, err)
         return VerificationResult(True, "Tests OK", language)
 
+    def _find_tests(self, patterns: tuple[str, ...], excluded: tuple[str, ...]) -> list[Path]:
+        found = set()
+        for pattern in patterns:
+            found.update(path for path in self.workspace.rglob(pattern)
+                         if path.is_file() and not any(part in excluded for part in path.parts))
+        return sorted(found)
+
     def _security_scan(self, path: Path, language: Language) -> VerificationResult:
         if language == Language.PYTHON:
             return self._python_security(path)
-        return VerificationResult(True, "Security scan omitido", language)
+        return VerificationResult(False,
+            f"Seguridad no evaluada: no hay analizador para {language.value}", language)
 
     def _python_security(self, path: Path) -> VerificationResult:
         forbidden = {"eval", "exec", "compile", "__import__"}

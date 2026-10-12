@@ -115,6 +115,108 @@ class ProgrammingFollowupTests(unittest.TestCase):
         self.assertIsNotNone(answer)
         self.assertEqual(answer.payload['clarifications'][-1]['answer'], 'Mi herramienta')
 
+    def test_destination_answer_routes_new_folder_as_delivery_target(self):
+        self.job.state = 'awaiting_input'
+        self.job.objective = 'Crear un optimizador de PC con panel y análisis de controladores'
+        self.job.payload = {'objective': self.job.objective}
+        self.job.result = {'work_status': 'needs_input', 'input_kind': 'destination',
+                           'questions': ['¿Dónde creo el programa?'],
+                           'report': 'C:/runtime/missions/job/output/mission_progress.json'}
+        with TemporaryDirectory() as directory:
+            target = Path(directory) / 'IgrisOptimizer'
+
+            answer = programming_followup(str(target), self.queue)
+
+        self.assertTrue(answer.ready)
+        self.assertEqual(answer.payload['destination'], str(target))
+        self.assertEqual(answer.payload['resume_report'], self.job.result['report'])
+        self.assertEqual(answer.payload['clarifications'][-1]['answer'], str(target))
+
+    def test_destination_answer_routes_existing_project_as_source(self):
+        self.job.state = 'awaiting_input'
+        self.job.objective = 'Crear un programa nuevo con panel'
+        self.job.payload = {'objective': self.job.objective}
+        self.job.result = {'work_status': 'needs_input', 'input_kind': 'destination',
+                           'questions': ['¿Dónde creo el programa?'],
+                           'report': 'C:/runtime/missions/job/output/mission_progress.json'}
+        with TemporaryDirectory() as directory:
+            answer = programming_followup(directory, self.queue)
+
+        self.assertTrue(answer.ready)
+        self.assertEqual(answer.payload['root'], str(Path(directory).resolve()))
+        self.assertTrue(answer.payload['requires_existing'])
+        self.assertNotIn('resume_report', answer.payload)
+
+    def test_unfocused_path_reconnects_to_the_only_pending_destination_question(self):
+        self.job.state = 'awaiting_input'
+        self.job.objective = 'Moderniza Chess Master 3D en el destino indicado'
+        self.job.payload = {'objective': self.job.objective}
+        self.job.result = {'work_status': 'needs_input', 'input_kind': 'destination',
+                           'questions': ['¿Dónde creo el programa?']}
+        with TemporaryDirectory() as directory:
+            answer = programming_followup(directory, self.queue, active_job_id=None)
+
+        self.assertIsNotNone(answer)
+        self.assertTrue(answer.ready)
+        self.assertIs(answer.job, self.job)
+        self.assertEqual(answer.payload['root'], str(Path(directory).resolve()))
+
+    def test_unfocused_path_does_not_guess_between_pending_missions(self):
+        first = SimpleNamespace(
+            id='first0000000000000000000000000', capability='programming.mission',
+            state='awaiting_input', objective='Crear un juego', payload={},
+            result={'input_kind': 'destination', 'questions': ['¿Dónde?']}, message='')
+        second = SimpleNamespace(
+            id='second000000000000000000000000', capability='programming.mission',
+            state='awaiting_input', objective='Crear una web', payload={},
+            result={'input_kind': 'project_path', 'questions': ['¿Qué carpeta?']}, message='')
+        self.queue.recent.return_value = [first, second]
+
+        answer = programming_followup(r'C:\Users\samva\Desktop\Proyecto',
+                                      self.queue, active_job_id=None)
+
+        self.assertIsNotNone(answer)
+        self.assertFalse(answer.ready)
+        self.assertIn(first.id[:8], answer.message)
+        self.assertIn(second.id[:8], answer.message)
+
+    def test_destination_answer_preserves_other_supplied_folder_as_reference(self):
+        self.job.state = 'awaiting_input'
+        with TemporaryDirectory() as directory:
+            source = Path(directory) / 'Chess Master, original'
+            destination = Path(directory) / 'IGRIS Chess Modern'
+            source.mkdir()
+            destination.mkdir()
+            self.job.objective = (
+                f'La carpeta original que debes mantener intacta es:\n{source}\n'
+                f'Crea el prototipo en esta carpeta:\n{destination}'
+            )
+            self.job.payload = {'objective': self.job.objective}
+            self.job.result = {
+                'work_status': 'needs_input', 'input_kind': 'destination',
+                'questions': ['¿Dónde creo el programa?'],
+                'report': 'C:/runtime/missions/job/output/mission_progress.json',
+            }
+
+            answer = programming_followup(str(destination), self.queue)
+
+        self.assertTrue(answer.ready)
+        self.assertEqual(answer.payload['root'], str(destination.resolve()))
+        self.assertEqual(answer.payload['resource_roots'], [str(source.resolve())])
+        self.assertEqual(answer.payload['clarifications'][-1]['answer'], str(destination))
+
+    def test_destination_answer_rejects_missing_parent(self):
+        self.job.state = 'awaiting_input'
+        self.job.result = {'work_status': 'needs_input', 'input_kind': 'destination',
+                           'questions': ['¿Dónde creo el programa?']}
+        with TemporaryDirectory() as directory:
+            target = Path(directory) / 'missing' / 'project'
+
+            answer = programming_followup(str(target), self.queue)
+
+        self.assertFalse(answer.ready)
+        self.assertIn('directorio padre ya exista', answer.message)
+
 
 if __name__ == '__main__':
     unittest.main()

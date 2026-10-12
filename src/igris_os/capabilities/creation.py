@@ -27,7 +27,7 @@ from igris_os.programming import (
     AutonomousProgrammingCoordinator, MultiLanguageCoordinator,
     MultiLanguageVerifier, PythonProjectDeveloper,
     EngineeringAssessor, EngineeringWorkflow, ProgrammingPreflight,
-    ChangeProposalBuilder, RepositoryDeveloper,
+    ChangeProposalBuilder, RepositoryDeveloper, LocalProgrammingTeam,
 )
 
 
@@ -161,6 +161,11 @@ def register_creation_capabilities(registry: CapabilityRegistry) -> None:
         CapabilitySpec("programming.delegate",
                        "Delega una tarea a un especialista externo (Claude Code u Ollama local) con auto-reparacion",
                        ActionRisk.WRITE_WORKSPACE, True), _delegate)
+    registry.register(
+        CapabilitySpec("programming.team.execute",
+                       "Director local, programador Ollama y validador independiente en secuencia",
+                       ActionRisk.WRITE_WORKSPACE, True, timeout_seconds=1200),
+        _programming_team_execute)
     for name, description, handler in (
         ("image.resize", "Redimensiona una imagen", _resize_image),
         ("multimedia.extract_audio", "Extrae audio de un archivo", _extract_audio),
@@ -672,6 +677,49 @@ def _delegate(payload):
         sandboxed=result.sandboxed,
         containment_violations=result.containment_violations,
         attempts=result.attempts)
+
+
+def _programming_team_execute(payload):
+    """Orquesta los tres roles locales con verificación objetiva obligatoria."""
+    from igris_os.delegation import DelegatedTask
+
+    objective = str(payload.get("objective", "")).strip()
+    if not objective or not str(payload.get("workspace", "")).strip():
+        return ExecutionResult.failure(
+            "Faltan objective o workspace", "INVALID_TEAM_TASK")
+    verify_command = _as_tuple(payload.get("verify_command"))
+    if not verify_command:
+        return ExecutionResult.failure(
+            "Indica verify_command; el equipo no acepta entregas sin pruebas",
+            "VERIFICATION_REQUIRED")
+    try:
+        task = DelegatedTask(
+            objective=objective,
+            workspace=Path(payload["workspace"]),
+            acceptance=_as_tuple(payload.get("acceptance")),
+            constraints=_as_tuple(payload.get("constraints")),
+            timeout_seconds=int(payload.get("timeout", 600)),
+            target_files=_as_tuple(payload.get("target_files")),
+            verify_command=verify_command,
+            canaries=tuple(Path(item) for item in _as_tuple(payload.get("canaries"))),
+        )
+        team = LocalProgrammingTeam(
+            director_model=str(payload.get("director_model", "deepseek-r1:8b")),
+            programmer_model=str(payload.get("programmer_model", "qwen2.5-coder:7b")),
+        )
+        result = team.run(task, max_attempts=max(1, int(payload.get("max_attempts", 3))))
+    except (KeyError, TypeError, ValueError) as exc:
+        return ExecutionResult.failure(str(exc), "INVALID_TEAM_TASK")
+    evidence = {
+        "plan": result.plan,
+        "changed_files": result.programmer.changed_files if result.programmer else (),
+        "programmer_verified": result.programmer.verified if result.programmer else False,
+        "validation_exit_code": result.validation.returncode if result.validation else None,
+        "validation_sandboxed": result.validation.sandboxed if result.validation else False,
+    }
+    if not result.success:
+        return ExecutionResult.failure(result.message, "TEAM_FAILED", data=evidence)
+    return ExecutionResult.success(result.message, **evidence)
 
 
 def _verify_delivery(payload):

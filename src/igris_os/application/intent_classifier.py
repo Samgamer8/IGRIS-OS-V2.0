@@ -62,16 +62,21 @@ _PROGRAMMING_OBJECTS = frozenset({
     "proyecto", "repositorio", "web", "pagina", "api", "bot", "servidor",
     "juego", "videojuego", "ajedrez", "chess", "godot", "python", "lua",
     "javascript", "typescript", "html", "css", "inventario", "calculadora",
-    "optimizer", "optimizador", "igris",
+    "optimizer", "optimizador", "igris", "prototipo", "muestra", "demo",
+    "maqueta", "entregable",
 })
 
 _CREATE_RE = re.compile(
     r"\b(?:crea|crear|creame|crees|haz|hazme|hagas|construye|construir|genera|generar|generes|"
-    r"desarrolla|desarrollar|programa|programar|implementa|implementar)\b")
+    r"desarrolla|desarrollar|programa|programar|implementa|implementar|realiza|realizar)\b")
 _CHANGE_RE = re.compile(
-    r"\b(?:mejor[a-z]*|arregl[a-z]*|repar[a-z]*|corrig[a-z]*|corrij[a-z]*|"
-    r"modific[a-z]*|actuali[a-z]*|refactor[a-z]*|optimiz[a-z]*|remaster[a-z]*|"
-    r"integr[a-z]*|renuev[a-z]*|renov[a-z]*)\b")
+    r"\b(?:mejora(?:r|lo|la|rlo|rla|me|ad|en|e)?|"
+    r"arregla(?:r|lo|la|rlo|rla)?|repara(?:r|lo|la|rlo|rla)?|"
+    r"corrige|corregir|corrija|corrijan|corrigiendo|"
+    r"modifica(?:r|lo|la|rlo|rla)?|actualiza(?:r|lo|la|rlo|rla)?|"
+    r"refactoriza(?:r|lo|la|rlo|rla)?|optimiza(?:r|lo|la|rlo|rla)?|"
+    r"remasteriza(?:r|lo|la|rlo|rla)?|integra(?:r|lo|la|rlo|rla)?|"
+    r"renueva(?:r|lo|la|rlo|rla)?|renova(?:r|lo|la|rlo|rla)?)\b")
 _CONTINUE_RE = re.compile(
     r"\b(?:continua|continuar|sigue|seguir|reanuda|reanudar|retoma(?:rlo|r|lo)?|retomes)\b")
 _RESUME_ONLY_RE = re.compile(
@@ -119,6 +124,18 @@ _CAPABILITY_GENERAL_RE = re.compile(
 )
 
 _LOCAL_PATH_RE = re.compile(r"(?<![\w])[a-z]:[\\/]")
+
+
+def _is_standalone_local_path(text: str) -> bool:
+    """Only a turn consisting of a path is a path answer, not a path-bearing task."""
+    raw = str(text or "").strip().strip('`').strip('"').strip("'").strip("“”")
+    if not raw or "\n" in raw or "\r" in raw:
+        return False
+    return bool(
+        re.fullmatch(r"[A-Za-z]:[\\/].+", raw)
+        or (raw.startswith("\\\\") and len(raw) > 3)
+        or (raw.startswith("/") and len(raw) > 1)
+    )
 
 _POLITE_EXECUTION_RE = re.compile(
     r"\b(?:puedes|podrias)\s+(?:programar|crear(?:me)?|hacer(?:me)?|desarrollar)\s+"
@@ -169,8 +186,9 @@ def classify_intent(
     if _RESUME_ONLY_RE.match(normalized):
         return IntentDecision("task", "resume", 0.99, ("resume_command",), normalized)
 
-    # Las rutas son contexto operativo, nunca charla casual.
-    if _LOCAL_PATH_RE.search(normalized) or normalized.startswith("/"):
+    # Una ruta sola completa una aclaración; una ruta dentro de una orden
+    # aporta contexto y no debe ocultar la acción solicitada.
+    if _is_standalone_local_path(text):
         return IntentDecision("task", "local_path", 0.99, ("local_path",), normalized)
 
     # Preguntas sobre capacidad se resuelven por el catalogo real, no por el LLM.
@@ -230,6 +248,13 @@ def classify_intent(
         return IntentDecision(
             "programming", "repair" if repair else "modify", 0.99,
             ("project_object", "change_action"), normalized)
+    # Instrucciones compuestas pueden pedir que se construya algo y, además,
+    # que se inspeccione o verifique. La creación es la entrega principal;
+    # test/audit son criterios de aceptación, no una sustitución de la tarea.
+    if project and create:
+        return IntentDecision(
+            "programming", "create", 0.99,
+            ("project_object", "creation_request"), normalized)
     if project and testing:
         return IntentDecision(
             "programming", "test", 0.98,

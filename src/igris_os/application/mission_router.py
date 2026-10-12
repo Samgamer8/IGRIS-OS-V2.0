@@ -121,15 +121,33 @@ def _existing_directory_sources(
     respuesta a una pregunta de una misión sin enviarla al chatbot.
     """
     candidates: list[str] = [str(item) for item in attachments]
-    candidates.extend(re.findall(r'["“”]([^"“”]+)["“”]', objective))
+    for match in re.finditer(
+            r'`{1,3}([^`\r\n]+)`{1,3}|["“]([^"“”]+)["”]', objective):
+        candidates.append(next(group for group in match.groups() if group is not None))
 
     # Rutas Windows no entrecomilladas. Se prefieren separadores claros y el
     # final de linea; no se interpreta texto normal como ruta.
-    for match in re.finditer(r'(?<![\w])([A-Za-z]:[\\/][^\r\n"<>|]+?)(?=(?:\s+[A-Za-zÁÉÍÓÚáéíóúÑñ]{3,}\s*:)|$)', objective):
+    for match in re.finditer(r'(?<![\w])([A-Za-z]:[\\/][^\r\n`"<>|]+?)(?=(?:\s+[A-Za-zÁÉÍÓÚáéíóúÑñ]{3,}\s*:)|[`"“”]|$)', objective):
         candidates.append(match.group(1))
     windows_tail = re.search(r'(?<![\w])([A-Za-z]:[\\/][^\r\n"<>|]+)\s*$', objective)
     if windows_tail:
         candidates.append(windows_tail.group(1))
+
+    # También admite rutas sin comillas en líneas independientes, como suele
+    # pegarlas la UI de IGRIS. Se prueban prefijos de cada línea de más largo a
+    # más corto y se conserva el primero que corresponde a una carpeta real;
+    # así se mantienen espacios y comas del nombre sin absorber la frase vecina.
+    for drive in re.finditer(r'(?<![\w])([A-Za-z]:[\\/])', objective):
+        line_end = objective.find("\n", drive.start())
+        if line_end < 0:
+            line_end = len(objective)
+        tail = objective[drive.start():line_end].rstrip("\r")
+        ends = {len(tail)}
+        ends.update(match.start() for match in re.finditer(r"\s+", tail))
+        for end in sorted(ends, reverse=True):
+            value = tail[:end].strip().strip("'\"` .,;!?")
+            if value:
+                candidates.append(value)
 
     candidates.extend(re.findall(
         r'(?<![\w])(/(?:[^/\s]+/)*[^/\s,;!?]+)', objective))

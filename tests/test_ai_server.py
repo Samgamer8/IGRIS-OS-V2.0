@@ -20,15 +20,47 @@ class LocalServerTests(unittest.TestCase):
             process = Mock()
             process.poll.return_value = None
             with patch.object(native, 'is_running', side_effect=[False, True]), \
+                 patch.object(server, '_probe_vram_free_mib', return_value=8000), \
                  patch('subprocess.Popen', return_value=process) as spawn:
                 self.assertTrue(native.start())
             command = spawn.call_args.args[0]
-            self.assertEqual(command[command.index('--ctx-size') + 1], '4096')
+            self.assertIn(int(command[command.index('--ctx-size') + 1]), (4096, 8192, 16384, 32768))
             self.assertEqual(command[command.index('--parallel') + 1], '1')
             self.assertIn('--sleep-idle-seconds', command)
             self.assertIn('--no-webui', command)
             native.stop()
             process.terminate.assert_called_once()
+
+    def test_native_context_size_respects_explicit_setting(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = root / 'llama-server.exe'
+            executable.touch()
+            model = root / 'model.gguf'
+            model.write_bytes(b'GGUF')
+            native = server.LlamaCppServer(executable, model, 'http://127.0.0.1:30000',
+                                           context_size=16384)
+            process = Mock()
+            process.poll.return_value = None
+            with patch.object(native, 'is_running', side_effect=[False, True]), \
+                 patch.object(server, '_probe_vram_free_mib', return_value=8000), \
+                 patch('subprocess.Popen', return_value=process) as spawn:
+                self.assertTrue(native.start())
+            command = spawn.call_args.args[0]
+            self.assertEqual(command[command.index('--ctx-size') + 1], '16384')
+
+    def test_native_context_size_rejects_out_of_range(self):
+        with self.assertRaises(ValueError):
+            server._llama_context_size(2048)
+
+    def test_native_context_size_auto_falls_back_without_vram(self):
+        with patch.object(server, '_probe_vram_free_mib', return_value=None):
+            self.assertEqual(server._llama_context_size(None), 4096)
+
+    def test_native_context_size_auto_scales_with_free_vram(self):
+        for free, expected in ((7600, 32768), (6400, 16384), (5600, 8192), (4000, 4096)):
+            with patch.object(server, '_probe_vram_free_mib', return_value=free):
+                self.assertEqual(server._llama_context_size(None), expected, f'free={free}')
 
     def test_native_settings_survive_application_to_environment(self):
         from igris_os.ui.settings_store import apply_ai_settings

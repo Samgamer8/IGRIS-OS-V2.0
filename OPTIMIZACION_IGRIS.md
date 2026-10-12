@@ -39,8 +39,16 @@ medido a esta opcion. IGRIS termina los procesos que ha arrancado al cerrar la v
 no termina servidores externos que encuentre ya activos.
 
 El modo exclusivo evita consultar/cargar otros motores para tareas sencillas.
-Los modelos cloud se excluyen de los especialistas y los proveedores de pago se
-bloquean tanto en seleccion como en ejecucion, incluido el fallback.
+El selector mantiene el trabajo local por defecto. Solo con
+`IGRIS_ALLOW_CLOUD_MODELS=1`, una clave `MOONSHOT_API_KEY` y sin ningun modelo
+local apto por memoria puede usar Moonshot como fallback. En ese caso se envian
+el prompt y su contexto al proveedor, que puede aplicar cargos; no incluya
+secretos ni codigo que no pueda compartir. El fallback registra el backend y
+el alcance externo en los datos de la respuesta.
+Para un servidor compatible con `/v1/models` y `/v1/chat/completions`, configure
+`IGRIS_ALLOW_REMOTE_MODELS=1`, `IGRIS_REMOTE_OPENAI_ENDPOINT=https://servidor/v1`
+y `IGRIS_REMOTE_OPENAI_API_KEY`. Solo se acepta HTTPS con token; se intenta esa
+ruta antes que Moonshot y solo si ningun modelo local cabe.
 Las respuestas de texto tienen limites de salida; los contratos JSON se transmiten
 al motor compatible. Las pruebas de disponibilidad se solapan en el modo multimotor.
 

@@ -1,8 +1,9 @@
-"""Comprensión semántica basada en contexto para IGRIS OS.
+"""Comprensión contextual con barreras deterministas para IGRIS OS.
 
-El LLM interpreta significado y continuidad. El código valida la salida y el
-router sólo permite capacidades registradas. Las heurísticas antiguas quedan
-como fallback cuando ningún modelo está disponible.
+El LLM interpreta significado y continuidad. El código valida la salida,
+recupera órdenes operativas mal etiquetadas y el router sólo permite
+capacidades registradas. Las reglas deterministas también protegen el camino
+principal frente a respuestas semánticas contradictorias.
 """
 from __future__ import annotations
 
@@ -131,11 +132,12 @@ class SemanticInterpreter:
         return SYSTEM + "\nCONTEXTO_JERARQUICO:\n" + json.dumps(payload, ensure_ascii=False)
 
     def _guard(self, frame: IntentFrame, objective: str) -> IntentFrame:
-        """Aplica invariantes de producto después de la interpretación semántica.
+        """Valida coherencia y aplicación antes de convertir intención en capacidad.
 
-        El LLM interpreta significado; estas reglas no intentan reemplazarlo. Sólo
-        impiden dos errores peligrosos: ejecutar cuando el usuario ha pedido una
-        fase previa de comprensión/inspección, y actuar con confianza insuficiente.
+        El LLM aporta comprensión contextual; las reglas deterministas impiden
+        que una orden operativa termine en chat por una etiqueta contradictoria,
+        corrigen consultas de capacidad y dejan las peticiones ambiguas en
+        aclaración. No conceden permisos: el kernel sigue controlando la ejecución.
         """
         from igris_os.application.intent_classifier import normalize_intent, classify_intent
         from igris_os.application.programming_followup import is_standalone_local_path
@@ -178,29 +180,109 @@ class SemanticInterpreter:
                 source=frame.source + ":path_guard", evidence=("standalone_local_path",),
             )
 
-        # Si el modelo degrada a chat una frase que claramente introduce el
-        # sujeto operativo de un proyecto existente, conserva ese contexto y
-        # pregunta sólo el dato imprescindible. Es una red de seguridad; la
-        # interpretación semántica sigue siendo la ruta principal.
+        # El clasificador determinista es una barrera de producto: una orden
+        # clara no puede degradarse a chat porque el modelo devuelva, por
+        # ejemplo, programming/explain o conversation/chat.
         fallback_decision = classify_intent(
             objective, has_active_programming_context=(
                 state_context.get("active_domain") == "programming" or
                 state_context.get("pending_domain") == "programming"))
-        preliminary_inspect = any(fragment in text for fragment in (
-            "primero entiende", "primero entiendas", "primero revisa",
-            "primero analiza", "sin modificar", "no modifiques", "no cambies",
-            "no toques nada", "solo revisa", "solo analiza",
-        ))
-        if frame.domain == "conversation" and fallback_decision.kind == "programming" and (
-                fallback_decision.subtype == "context" or preliminary_inspect):
+
+        if (fallback_decision.kind == "capability" and
+                (frame.domain != "capability" or frame.intent != "capability_query")):
             return IntentFrame(
-                domain="programming", intent="audit_project", mode="inspect",
-                goal="entender y revisar el proyecto existente antes de modificarlo",
-                target="", continuation=False, risk="read_only", confidence=0.93,
+                domain="capability", intent="capability_query", mode="explain",
+                goal=objective, risk="none",
+                confidence=fallback_decision.confidence,
+                source=frame.source + ":deterministic_capability_guard",
+                evidence=fallback_decision.reasons,
+            )
+
+        if fallback_decision.kind == "programming":
+            if fallback_decision.subtype == "context":
+                return IntentFrame(
+                    domain="programming", intent="audit_project", mode="inspect",
+                    goal=objective,
+                    target=str(state_context.get("active_target") or "").strip(),
+                    continuation=False, risk="read_only",
+                    confidence=fallback_decision.confidence,
+                    needs_clarification=True,
+                    clarification_question=(
+                        "¿Qué quieres que haga con ese proyecto: analizarlo, corregirlo, "
+                        "mejorarlo o continuar su desarrollo? Indica la carpeta si aún no está seleccionada."
+                    ),
+                    source=frame.source + ":deterministic_project_context_guard",
+                    evidence=fallback_decision.reasons,
+                )
+
+            programming_mapping = {
+                "create": ("create_project", "execute"),
+                "continue": ("continue_project", "continue"),
+                "followup": ("continue_project", "continue"),
+                "modify": ("modify_project", "modify"),
+                "repair": ("repair_project", "repair"),
+                "test": ("test_project", "inspect"),
+                "audit": ("audit_project", "inspect"),
+            }
+            mapped = programming_mapping.get(fallback_decision.subtype)
+            if mapped is None:
+                return IntentFrame(
+                    domain="unknown", intent="unknown", mode="explain",
+                    goal=objective, confidence=fallback_decision.confidence,
+                    needs_clarification=True,
+                    clarification_question=(
+                        "He detectado una petición sobre un proyecto, pero no una acción concreta. "
+                        "¿Qué resultado quieres que produzca?"
+                    ),
+                    source=frame.source + ":deterministic_programming_guard",
+                    evidence=fallback_decision.reasons,
+                )
+
+            expected_intent, expected_mode = mapped
+            from igris_os.application.mission_router import _existing_directory_sources
+            has_resolved_path = bool(_existing_directory_sources(objective))
+            can_resolve_without_question = (
+                fallback_decision.subtype == "create" or has_resolved_path or
+                bool(str(state_context.get("active_target") or "").strip()))
+            if (frame.domain != "programming" or frame.intent != expected_intent
+                    or frame.goal != objective
+                    or (frame.needs_clarification and can_resolve_without_question)):
+                active_target = str(state_context.get("active_target") or "").strip()
+                target = active_target if fallback_decision.subtype in {"continue", "followup"} else ""
+                risk = "read_only" if expected_mode == "inspect" else "safe_write"
+                if frame.risk in {"admin", "restart", "destructive"}:
+                    risk = frame.risk
+                return IntentFrame(
+                    domain="programming", intent=expected_intent,
+                    mode=expected_mode, goal=objective, target=target,
+                    continuation=fallback_decision.subtype in {"continue", "followup"},
+                    risk=risk, confidence=fallback_decision.confidence,
+                    source=frame.source + ":deterministic_programming_guard",
+                    evidence=fallback_decision.reasons + ("operation_overrides_chat_label",),
+                )
+
+        if (fallback_decision.kind == "task" and
+                (frame.domain == "conversation" or frame.intent in {"chat", "explain"})):
+            return IntentFrame(
+                domain="unknown", intent="unknown", mode="explain",
+                goal=objective, confidence=fallback_decision.confidence,
                 needs_clarification=True,
-                clarification_question="¿Cuál es la ruta exacta de la carpeta del proyecto que quieres que revise?",
-                source=frame.source + ":project_context_guard",
-                evidence=("operational_project_subject",),
+                clarification_question=(
+                    "He detectado una orden, pero no puedo asociarla a una capacidad ejecutable con seguridad. "
+                    "Concreta el resultado o el tipo de archivo que esperas."
+                ),
+                source=frame.source + ":unresolved_task_guard",
+                evidence=fallback_decision.reasons,
+            )
+
+        if (fallback_decision.kind == "conversation" and
+                frame.domain != "conversation" and frame.intent in {"chat", "explain"}):
+            return IntentFrame(
+                domain="conversation",
+                intent=("explain" if fallback_decision.subtype == "technical_advice" else "chat"),
+                mode="explain", goal=objective, confidence=fallback_decision.confidence,
+                source=frame.source + ":deterministic_conversation_guard",
+                evidence=fallback_decision.reasons,
             )
 
         # Una continuación de programación no debe perder el target activo sólo
@@ -211,31 +293,6 @@ class SemanticInterpreter:
                 data.update(target=active_target, continuation=True)
                 frame = IntentFrame.from_mapping(data, source=frame.source)
                 data = frame.to_dict()
-
-        # Expresiones de fase previa/solo comprensión: nunca son permiso de escritura.
-        inspect_first = any(fragment in text for fragment in (
-            "primero entiende", "primero entiendas", "primero revisa",
-            "primero analiza", "sin modificar", "no modifiques", "no cambies",
-            "no toques nada", "solo revisa", "solo analiza",
-        ))
-        if frame.domain == "programming" and inspect_first:
-            active_target = str(self.state.context().get("active_target", "") or "").strip()
-            target = frame.target.strip() or active_target
-            data.update(
-                intent="audit_project",
-                mode="inspect",
-                risk="read_only",
-                continuation=bool(active_target),
-                target=target,
-            )
-            if not target and not any(sep in objective for sep in ("\\", "/")):
-                data.update(
-                    needs_clarification=True,
-                    clarification_question=(
-                        "¿Cuál es la ruta exacta de la carpeta del proyecto que quieres que revise?"
-                    ),
-                )
-            return IntentFrame.from_mapping(data, source=frame.source)
 
         # Una intención operativa con confianza baja debe aclararse en vez de ejecutar.
         if frame.operational and frame.confidence < 0.62 and not frame.needs_clarification:
@@ -309,7 +366,10 @@ class SemanticInterpreter:
             mode=mode,
             goal=objective,
             continuation=(mode == "continue"),
-            confidence=min(0.55, max(0.25, decision.confidence * 0.55)),
+            # Las decisiones deterministas de alta confianza son suficientes
+            # para ejecutar el fallback local; no deben convertirse en una
+            # pregunta solo porque el modelo semántico no esté disponible.
+            confidence=decision.confidence,
             needs_clarification=needs,
             clarification_question=(
                 "¿Cuál es la ruta exacta de la carpeta del proyecto que quieres que revise?"

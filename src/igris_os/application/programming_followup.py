@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import re
 
-from .mission_router import _normalize_intent
+from .mission_router import _normalize_intent, _existing_directory_sources
 
 
 def is_correction(text):
@@ -113,7 +113,28 @@ def programming_followup(text, mission_queue, runtime=None, *, active_job_id=_UN
                            'needs_input', 'blocked', 'ready_for_review'})))
                   and not j.result.get('continued_by') and not is_correction(j.objective)]
     if not resume and active_job_id is not _UNSET_FOCUS:
-        candidates = [job for job in candidates if job.id == active_job_id]
+        if active_job_id is None and is_standalone_local_path(text):
+            # After a restart the UI may have lost its in-memory programming
+            # focus while the durable mission queue still has one unanswered
+            # path question. Reattach only when exactly one mission is waiting
+            # for a path; never guess between multiple pending projects.
+            path_candidates = [job for job in candidates
+                               if job.state == 'awaiting_input'
+                               and job.result.get('input_kind') in {
+                                   'destination', 'project_path', 'resource_path'}]
+            if len(path_candidates) == 1:
+                candidates = path_candidates
+            elif len(path_candidates) > 1:
+                ids = ', '.join(job.id[:8] for job in path_candidates[-5:])
+                return ProgrammingFollowup(
+                    path_candidates[-1], {},
+                    'Hay varias misiones esperando una ruta (' + ids + '). '
+                    'Indica cuál quieres reanudar antes de enviar la carpeta.',
+                    False, mode='questions')
+            else:
+                candidates = []
+        else:
+            candidates = [job for job in candidates if job.id == active_job_id]
 
     # Las preguntas sobre pruebas/evidencia pertenecen a la misión reciente;
     # no deben convertirse en una nueva misión de programación.
@@ -235,7 +256,38 @@ def programming_followup(text, mission_queue, runtime=None, *, active_job_id=_UN
         payload['resume_report'] = data['report']
         return ProgrammingFollowup(job, payload,
             'Reintento la mision ' + job.id[:8] + ' conservando sus archivos: ' + job.objective)
-    if data.get('input_kind') == 'project_path':
+    if data.get('input_kind') == 'destination':
+        raw_path = text.strip().strip('"').strip("'")
+        folder = Path(raw_path).expanduser()
+        question_text = '\n'.join(questions)
+        reference_roots = _existing_directory_sources(job.objective)
+        if folder.is_symlink():
+            return ProgrammingFollowup(job, payload,
+                'Esa ruta es un enlace. Indica una carpeta local normal.', False)
+        if folder.is_dir():
+            payload['root'] = str(folder.resolve())
+            payload['requires_existing'] = True
+            payload.pop('destination', None)
+            # The original checkpoint was made without this project root.
+            # Start a fresh staging copy so the existing files are inventoried first.
+            payload.pop('resume_report', None)
+        elif folder.exists() or not folder.parent.is_dir() or folder.parent.is_symlink():
+            return ProgrammingFollowup(job, payload,
+                'No puedo usar esa ruta. Indica una carpeta de proyecto existente o una carpeta nueva '
+                'cuyo directorio padre ya exista.', False)
+        else:
+            payload['destination'] = str(folder.resolve())
+            payload.pop('root', None)
+        target_key = str(folder.resolve()).casefold()
+        references = [path for path in reference_roots
+                      if str(Path(path).resolve()).casefold() != target_key]
+        if references:
+            payload['resource_roots'] = references[:4]
+        payload['clarifications'] = list(payload.get('clarifications', [])) + [{
+            'question': question_text, 'answer': text.strip(), 'mission_id': job.id}]
+        if data.get('report') and 'root' not in payload:
+            payload['resume_report'] = data['report']
+    elif data.get('input_kind') == 'project_path':
         folder = Path(text.strip().strip('"')).expanduser()
         if not folder.is_dir():
             return ProgrammingFollowup(job, payload,
@@ -312,7 +364,8 @@ def programming_followup(text, mission_queue, runtime=None, *, active_job_id=_UN
             if resolved not in roots:
                 roots.append(resolved)
             payload['resource_roots'] = roots[:4]
-    if data.get('report'):
+    if data.get('report') and not (
+            data.get('input_kind') == 'destination' and payload.get('root')):
         payload['resume_report'] = data['report']
     # Product choices are not permission to download, publish or run an updater.
     return ProgrammingFollowup(job, payload,

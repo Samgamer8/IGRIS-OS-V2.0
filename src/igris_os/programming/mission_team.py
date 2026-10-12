@@ -211,16 +211,99 @@ class ProgrammingTeam:
         return json.dumps(context, ensure_ascii=False)
 
     @staticmethod
-    def _validate_plan(plan):
+    def _clarification_gate(objective, plan, *, has_source, destination):
+        if not has_source and not destination:
+            return ([
+                '¿Dónde creo el programa? Indica la ruta completa de una carpeta nueva, '
+                'o la carpeta de un proyecto existente que deba revisar y conservar.'
+            ], 'destination')
+        questions = plan.get('questions', [])
+        def normalize(value):
+            decomposed = unicodedata.normalize('NFKD', str(value or '').casefold())
+            return ''.join(char for char in decomposed if not unicodedata.combining(char))
+        normalized_objective = normalize(objective)
+        feature_terms = ('diagnos', 'analiz', 'component', 'aplicacion', 'controlador',
+                         'driver', 'panel', 'interfaz', 'optimiz', 'rendimiento')
+        detailed_request = (len(objective.split()) >= 30 or
+                            sum(term in normalized_objective for term in feature_terms) >= 3)
+        if detailed_request:
+            generic = re.compile(
+                r'(principales funcionalidades|funcionalidades.*incluir|'
+                r'requisito.*adicional|requisito especifico|algo mas.*implementar|'
+                r'resultado especifico.*(busca|espera|mejorar)|'
+                r'que resultado.*(busca|espera|quiere)|que objetivo.*(busca|quiere))')
+            questions = [q for q in questions if not generic.search(normalize(q))]
+        return questions[:2], ''
+
+    @staticmethod
+    def _clarification_message(objective, plan):
+        normalized = unicodedata.normalize('NFKD', objective.casefold())
+        diagnostic_request = re.search(
+            r'(controlador|driver|hardware|componentes).*(optimiz|diagnos|rendimiento)|'
+            r'(optimiz|diagnos).*(controlador|driver|hardware|componentes)', normalized)
+        if diagnostic_request:
+            steps = [
+                'confirmar la carpeta y revisar su estructura',
+                'inventariar hardware, controladores y aplicaciones con fuentes verificables',
+                'crear el panel y el diagnóstico en modo lectura',
+                'proponer optimizaciones; exigir confirmación antes de cambiar controladores',
+                'ejecutar pruebas automatizadas y revisar resultados',
+            ]
+        else:
+            steps = [str(step).strip() for step in plan.get('steps', []) if str(step).strip()]
+        summary = 'He entendido: ' + plan.get('understanding', objective.strip())
+        if steps:
+            summary += '\nPlan provisional: ' + ' > '.join(steps[:5])
+        if diagnostic_request:
+            summary += ('\nAlcance seguro: inventario estándar de hardware, controladores y '
+                        'aplicaciones instaladas; sin leer documentos personales. Diagnóstico '
+                        'en modo lectura; cada cambio de controlador exigirá confirmación y '
+                        'fuentes verificables.')
+        summary += '\nTodavía no he modificado tu proyecto ni el sistema.'
+        return summary
+
+    @staticmethod
+    def _validate_plan(plan, objective=''):
         if not isinstance(plan.get('understanding'), str) or not plan['understanding'].strip():
             raise ValueError('El planificador no concreto el encargo')
         questions = plan.get('questions')
         if not isinstance(questions, list) or len(questions) > 2 or any(
                 not isinstance(q, str) or not q.strip() for q in questions):
             raise ValueError('El plan debe incluir como maximo dos preguntas breves')
+        requirements = plan.get('requirements', [])
+        # Un resumen correcto no basta: las pruebas y requisitos también deben
+        # corresponder al dominio solicitado. Esto evita aceptar planes plantilla
+        # (por ejemplo, pruebas de sumar dentro de un encargo de ajedrez).
+        if objective and isinstance(requirements, list) and requirements:
+            text = unicodedata.normalize('NFKD', str(objective).casefold())
+            text = ''.join(char for char in text if not unicodedata.combining(char))
+            requirement_text = ' '.join(
+                str(item.get('description', '')) for item in requirements
+                if isinstance(item, dict))
+            requirement_text = unicodedata.normalize('NFKD', requirement_text.casefold())
+            requirement_text = ''.join(
+                char for char in requirement_text if not unicodedata.combining(char))
+            topic_groups = (
+                (r'\b(?:ajedrez|chess)\b',
+                 r'\b(?:ajedrez|chess|tablero|piezas?|peones?|dragon(?:es)?|rey|jaque|enroque|jugadas?|partidas?)\b'),
+                (r'\b(?:videojuego|juego|godot)\b',
+                 r'\b(?:juego|videojuego|jugador|mecanica|nivel|escena|personaje|partida|controles?)\b'),
+                (r'\b(?:pagina web|sitio web|web)\b',
+                 r'\b(?:web|pagina|sitio|html|css|javascript|formulario|navegacion)\b'),
+                (r'\b(?:video|audio|sonido|musica)\b',
+                 r'\b(?:video|audio|sonido|musica|pista|clip|reproduccion|edicion)\b'),
+                (r'\b(?:datos|dataset|analisis de datos)\b',
+                 r'\b(?:datos|dataset|analisis|estadistica|grafica|informe|consulta)\b'),
+                (r'\b(?:seguridad|ciberseguridad|vulnerabilidad)\b',
+                 r'\b(?:seguridad|ciberseguridad|vulnerabilidad|amenaza|riesgo|autenticacion)\b'),
+            )
+            for trigger, markers in topic_groups:
+                if re.search(trigger, text) and not re.search(markers, requirement_text):
+                    raise ValueError(
+                        'Los criterios del plan no corresponden al dominio solicitado; '
+                        'se rechaza el plan antes de escribir archivos')
         if questions:
             return
-        requirements = plan.get('requirements', [])
         if not isinstance(requirements, list) or not 1 <= len(requirements) <= 8:
             raise ValueError('Faltan criterios concretos de aceptacion')
         seen = set()
@@ -229,8 +312,18 @@ class ProgrammingTeam:
                     or not req.get('description') or req.get('validation') not in {'automated', 'user'}):
                 raise ValueError('Criterio de aceptacion invalido')
             seen.add(req['id'])
+            description = unicodedata.normalize('NFKD', req['description'].casefold())
+            test_path = req.get('test_path', '')
+            evidence_only = (req['validation'] == 'user' and test_path and
+                re.search(r'\b(ejecut\w*|run\w*|verific\w*|comprueb\w*)\b', description) and
+                re.search(r'\b(pruebas?|tests?|resultados?|evidencia|informe)\b', description) and
+                not re.search(r'\b(visual|estetica|apariencia|usabilidad|experiencia|jugable)\b', description))
+            if evidence_only and is_test(safe_relative(test_path)):
+                # Test execution and its machine-readable evidence are checked
+                # by the verifier; they must not become a spurious visual gate.
+                req['validation'] = 'automated'
             if req['validation'] == 'automated':
-                path = safe_relative(req.get('test_path', ''))
+                path = safe_relative(test_path)
                 if not is_test(path):
                     raise ValueError('Cada requisito automatizable necesita una prueba dedicada')
                 req['test_path'] = path
@@ -244,6 +337,26 @@ class ProgrammingTeam:
         # Algunos encargos visuales o de experiencia siguen siendo validables por
         # la inspeccion del usuario; en ese caso no bloqueamos el plan solo por
         # no tener una prueba automatizada dedicada.
+
+    def _validate_plan_or_repair(self, plan, objective, request, context):
+        try:
+            self._validate_plan(plan, objective)
+            return plan
+        except ValueError as exc:
+            if 'no corresponden al dominio solicitado' not in str(exc):
+                raise
+            corrected = self._ask(
+                'planificador',
+                'El plan anterior fue rechazado porque sus criterios no verifican el dominio real del encargo. '
+                'Vuelve a redactar el plan completo usando el encargo actual como única fuente de requisitos. '
+                'Cada criterio automatizado debe probar una función del producto solicitado. No reutilices '
+                'ejemplos ni pruebas de sumar(a, b), salvo que el usuario pida expresamente una calculadora. '
+                'Devuelve preguntas vacías si el encargo ya contiene los datos necesarios.\nENCARGO:\n' +
+                request + '\nPLAN RECHAZADO:\n' + json.dumps(plan, ensure_ascii=False) +
+                '\nMOTIVO:\n' + str(exc) + '\nARCHIVOS:\n' + context,
+                PLAN_SCHEMA)
+            self._validate_plan(corrected, objective)
+            return corrected
 
     def execute(self, objective: str, *, source: Path | None = None,
                 original_objective='', answers=None, allow_downloads=False, destination='',
@@ -266,7 +379,8 @@ class ProgrammingTeam:
                 previous_state = self._restore_work(resume_report, objective, source)
                 origin = self.state['resume_recovery']['origin_report']
                 recovered = recover_cursor(self.files, previous_state, origin,
-                    answers or [], delivery_contract or {}, self._validate_plan, self._check_test)
+                    answers or [], delivery_contract or {},
+                    lambda plan: self._validate_plan(plan, objective), self._check_test)
                 if recovered:
                     plan, self.cursor = recovered
                     self.state.update(plan=plan, cursor=self.cursor, resumed_phase=self.cursor['phase'])
@@ -305,6 +419,9 @@ class ProgrammingTeam:
                     'Los test_path deben ser NUEVOS tests dedicados: test_acceptance_*.py o '
                     'acceptance_*.gd o acceptance_*.test.mjs. No uses pruebas heredadas para fingir '
                     'cumplir nuevas funciones. Conserva requisitos visuales o subjetivos con validation=user. '
+                    'Cada requisito y cada prueba deben verificar el dominio y las funciones explícitas del '
+                    'encargo actual; no reutilices ejemplos ni tareas de conversaciones previas. No propongas '
+                    'sumar(a, b) salvo que se pida una calculadora o una suma. '
                     'No reduzcas el encargo a que arranque. Descompone funciones concretas. '
                     'Deduce funciones razonables de la finalidad descrita; no preguntes al usuario '
                     'de nuevo datos ya indicados. Una respuesta como si todo lo necesario elige el '
@@ -315,7 +432,14 @@ class ProgrammingTeam:
                     'despues de comprobar inicializacion y funciones reales, y salir con codigo 0. '
                     'El test no puede ser una respuesta fija.\nENCARGO:\n' + request +
                     '\nARCHIVOS:\n' + context + '\nHERRAMIENTAS:\n' + json.dumps(self.tools.inventory()), PLAN_SCHEMA)
-                self._validate_plan(plan)
+                plan = self._validate_plan_or_repair(plan, objective, request, context)
+                questions, input_kind = self._clarification_gate(
+                    objective, plan, has_source=source is not None,
+                    destination=destination or str((delivery_contract or {}).get('destination', '')))
+                if questions != plan.get('questions', []):
+                    plan['questions'] = questions
+                    if not questions:
+                        self._validate_plan(plan, objective)
                 if plan['questions'] and answers:
                     plan = self._ask('planificador',
                         'Ya tienes las respuestas del usuario. Corrige el plan anterior usando el encargo '
@@ -324,14 +448,27 @@ class ProgrammingTeam:
                         'de herramientas se solicitan por su mecanismo propio. No cambies de proyecto.\n'
                         'ENCARGO:\n' + request + '\nPLAN ANTERIOR:\n' + json.dumps(plan, ensure_ascii=False) +
                         '\nARCHIVOS:\n' + context, PLAN_SCHEMA)
-                    self._validate_plan(plan)
+                    plan = self._validate_plan_or_repair(plan, objective, request, context)
                     if plan['questions']:
                         raise ValueError('El planificador repitio preguntas ya respondidas; se conserva el encargo y su respuesta')
+                questions, input_kind = self._clarification_gate(
+                    objective, plan, has_source=source is not None,
+                    destination=destination or str((delivery_contract or {}).get('destination', '')))
+                if input_kind:
+                    plan['questions'] = questions
+                elif questions != plan.get('questions', []):
+                    plan['questions'] = questions
+                    if not questions:
+                        self._validate_plan(plan, objective)
                 self.state['plan'] = plan
+                self.state['questions'] = plan['questions']
+                self.state['input_kind'] = input_kind
                 save_json(self.files.output / 'mission_plan.json', plan)
                 if plan['questions']:
-                    return self._result(False, 'needs_input', plan['understanding'],
-                                        questions=plan['questions'], understanding=plan['understanding'])
+                    return self._result(False, 'needs_input',
+                        self._clarification_message(objective, plan),
+                        questions=plan['questions'], input_kind=input_kind,
+                        understanding=plan['understanding'])
             else:
                 plan = self.state['plan']
             requested_technology = plan.get('technology_requested', plan.get('technology'))
@@ -362,6 +499,11 @@ class ProgrammingTeam:
                 test_package = self._ask('comprobador',
                     'Crea pruebas funcionales para el contrato. Devuelve files con path y content. '
                     'Respeta APIs existentes y las interfaces nuevas descritas en steps. '
+                    'Las pruebas nunca deben contener la implementacion de produccion. Python: '
+                    'importa la funcion o clase desde su modulo de produccion; si el plan no '
+                    'indica modulo, una funcion nueva sumar se importa desde sumar.py. No definas '
+                    'copias locales de la API que se esta probando. Es correcto que el baseline '
+                    'falle porque aun falta implementar el modulo o simbolo. '
                     'Exige comportamiento real, casos limite y regresiones; no pruebes constantes ni '
                     'copies la implementacion. Python: pytest con assert; Godot: SceneTree, assert, '
                     'en los casos de fallo usa push_error, quit(1) y return; incluye assert y '
@@ -370,9 +512,13 @@ class ProgrammingTeam:
                     'Solo estos archivos: ' + json.dumps(tests) + '\nCONTRATO:\n' + json.dumps(plan, ensure_ascii=False) +
                     '\nARCHIVOS:\n' + context, TEST_SCHEMA)
                 supplied = test_package.get('files', [])
-                if not isinstance(supplied, list) or {f.get('path') for f in supplied} != set(tests) or len(supplied) != len(tests):
-                    raise ValueError('Las pruebas no cubren los archivos del contrato')
-                for item in supplied:
+                test_files = self._required_test_files(supplied, tests)
+                extra_paths = [f.get('path') for f in supplied if isinstance(f, dict)
+                               and f.get('path') not in tests]
+                if extra_paths:
+                    history.append({'tool': 'extra_test_agent_files_ignored',
+                                    'result': {'paths': extra_paths}})
+                for item in test_files:
                     content = item['content']
                     self._check_test(technology, content)
                     if self.files.path(item['path']).exists():
@@ -392,11 +538,14 @@ class ProgrammingTeam:
             review_attempts = self.cursor['review_attempts']
             seen = self.cursor['seen']
             while True:
+                force_review = False
                 self._progress(min(80, 20 + len(self.calls) * 2), 'programador',
                                'Editando y comprobando el proyecto con herramientas')
                 prompt = ('Ejecuta UNA herramienta y espera su resultado. Lee un archivo antes de '
                     'editarlo. Usa replace_text para cambios pequenos. Las pruebas estan congeladas '
                     'y no puedes modificarlas. Implementa las funciones, no instrucciones para el usuario. '
+                    'Si una prueba congelada importa una API de un modulo que falta, crea ese modulo '
+                    'de produccion e implementa la API importada; nunca copies ni reescribas la prueba. '
                     'No alteres configuracion de tests para ocultar fallos. Antes de finish deben existir '
                     'cambios de codigo y pruebas correctas. Herramientas: list_files; read_file(path,start,lines); '
                     'read_files(paths hasta 12 archivos); write_files(files [{path,content}] hasta 12 archivos); '
@@ -469,6 +618,13 @@ class ProgrammingTeam:
                             'Revisa de forma critica el contrato, el diff y la ejecucion real. Rechaza '
                             'tests vacios/tautologicos, alcance recortado, plantillas que no resuelven el '
                             'encargo, errores logicos o tests desactivados. approved solo si no hay issues. '
+                            'No exijas inspeccion visual cuando la evidencia automatica del comprobador '
+                            'demuestra el requisito. Un requisito validation=user se informa como user_review, '
+                            'pero esa revision pendiente del usuario no es un defecto ni un issue; no bloquea '
+                            'la entrega tecnica. Respeta exactamente el contrato: validation=automated implica '
+                            'status=satisfied si la evidencia lo demuestra; validation=user implica '
+                            'status=user_review aunque haya artefactos generados, pues requiere confirmacion '
+                            'humana. approved puede ser true si no hay defectos concretos. '
                             'Incluye TODOS los requisitos por id: satisfied para automatizados demostrados '
                             'o user_review para los que necesitan visto bueno visual del usuario. Cada uno '
                             'con evidence concreta. No declares aprobacion visual sin verla. '
@@ -499,12 +655,55 @@ class ProgrammingTeam:
                 except (ValueError, OSError, TypeError, KeyError, SyntaxError) as exc:
                     history.append({'tool': action, 'error': str(exc)})
                     self.cursor['pending_action'] = None
+                    # A small local model can ignore the frozen-test instruction
+                    # after it has already implemented the API. Keep the test
+                    # immutable, independently rerun it, then send verified code
+                    # through the normal reviewer instead of repeating a doomed write.
+                    if (isinstance(action, dict) and action.get('tool') == 'write_file'
+                            and action.get('path') in self.files.locked
+                            and 'Prueba inmutable' in str(exc)):
+                        checked = self.tools.verify(technology, tests)
+                        changed, _ = self.files.changes()
+                        has_implementation = any(
+                            not is_test(path) and Path(path).suffix in {
+                                '.py', '.gd', '.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx',
+                                '.lua', '.tscn', '.css', '.html'}
+                            for path in changed)
+                        if checked.get('ok') is True and has_implementation:
+                            history.append({'tool': 'frozen_test_rewrite_rejected',
+                                            'result': {'verification': checked,
+                                                       'implementation_files': changed}})
+                            self.cursor['pending_action'] = {
+                                'tool': 'finish',
+                                'summary': 'La implementación existe; las pruebas congeladas pasan. '
+                                           'Solicito revisión independiente sin modificarlas.'}
+                            force_review = True
                     if action.get('tool') == 'finish' and review_attempts >= 3:
                         raise
-                self.cursor['pending_action'] = None
+                if not force_review:
+                    self.cursor['pending_action'] = None
                 self._checkpoint()
         except (ValueError, OSError, TypeError, KeyError, SyntaxError) as exc:
             return self._result(False, 'blocked', str(exc))
+
+    @staticmethod
+    def _required_test_files(supplied, tests):
+        if not isinstance(supplied, list):
+            raise ValueError('El comprobador no devolvio una lista de pruebas')
+        required = set(tests)
+        found = {}
+        for item in supplied:
+            if not isinstance(item, dict) or not isinstance(item.get('path'), str):
+                continue
+            path = item['path']
+            if path not in required:
+                continue
+            if path in found:
+                raise ValueError('El comprobador duplico una prueba del contrato: ' + path)
+            found[path] = item
+        if set(found) != required:
+            raise ValueError('Las pruebas no cubren los archivos del contrato')
+        return [found[path] for path in tests]
 
     @staticmethod
     def _check_test(technology, content):

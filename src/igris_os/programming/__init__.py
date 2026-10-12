@@ -5,6 +5,7 @@ from .developer import DevelopmentResult, PythonProjectDeveloper
 from .engineering_workflow import EngineeringRunResult, EngineeringWorkflow
 from .languages import (Language, LanguageProfile, MultiLanguageVerifier,
                          ToolchainDetection, UniversalQualityGate)
+from .local_team import LocalProgrammingTeam, ProgrammingTeamResult
 from .multilang import LanguageDevelopmentResult, MultiLanguageCoordinator
 from .multi_file_developer import MultiFileDevelopmentResult, PythonMultiFileDeveloper
 from .optimizer import OptimizationResult, PerformanceOptimizer
@@ -35,6 +36,8 @@ __all__ = [
     "Language",
     "LanguageDevelopmentResult",
     "LanguageProfile",
+    "LocalProgrammingTeam",
+    "ProgrammingTeamResult",
     "ToolchainDetection",
     "MultiLanguageCoordinator",
     "MultiFileDevelopmentResult",

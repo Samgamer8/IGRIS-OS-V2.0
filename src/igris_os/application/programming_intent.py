@@ -12,7 +12,7 @@ PROJECT_CAPABILITIES = {'games.godot.scaffold', 'games.godot.resume', 'repositor
     'programming.autonomous.develop', 'programming.python.multifile.develop',
     'programming.node.develop', WORK_CAPABILITY, 'programming.deliver'}
 CHANGE = r'(?:mejora(?:r|lo|rlo)?|mejores|arregla(?:r|lo)?|repara(?:r|lo)?|corrige|corregir|modifica(?:r|lo)?|implementa(?:r)?|anade|agrega|refactoriza|actualiza(?:r|lo)?|optimiza(?:r|lo)?|remasteriza(?:r|lo)?|integra(?:r|lo)?|renueva(?:r|lo)?)'
-CREATE = r'(?:crea(?:r|me)?|construye|construir|contrullas|contruye|genera(?:r)?|desarrolla(?:r)?|programa(?:r|ndo)?|hazme|haz)'
+CREATE = r'(?:crea(?:r|me|s)?|cree(?:s)?|construye|construir|construyas|contrullas|contruye|genera(?:r|me|s)?|desarrolla(?:r|s)?|programa(?:r|ndo|s)?|hazme|haz)'
 CONTINUE = r'(?:continua(?:r)?|sigue|seguir|reanuda|reanudar|retoma|retomar)'
 PROJECT_WORDS = ('proyecto', 'prollecto', 'projecto', 'juego', 'videojuego', 'ajedrez', 'ajedres', 'chess', 'chees',
     'codigo', 'programa', 'aplicacion', 'app', 'repositorio', 'script', 'python', 'godot',
@@ -21,9 +21,14 @@ PROJECT_WORDS = ('proyecto', 'prollecto', 'projecto', 'juego', 'videojuego', 'aj
 
 
 def is_improvement_request(text):
+    normalized = _normalize_intent(text)
+    explicit_new_project = bool(re.search(
+        r'\b' + CREATE + r'\b.{0,240}\b(?:programa|aplicacion|software|proyecto|'
+        r'juego|videojuego|web|pagina|app|bot|servidor)\b', normalized))
     decision = classify_intent(text)
     return (decision.kind == "programming" and
-            decision.subtype in {"continue", "modify", "repair", "followup"})
+            decision.subtype in {"continue", "modify", "repair", "followup"} and
+            not explicit_new_project)
 
 
 def is_programming_request(objective):

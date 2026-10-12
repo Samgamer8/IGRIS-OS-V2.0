@@ -1,0 +1,13 @@
+{
+  "policy": "Changes require explicit administrator approval",
+  "files": [
+    {
+      "path": "src/igris_os/ui/cinematic.py",
+      "sha256": "ea961d3ec340f53b907a4a33f256d33f74b1e6eedf2a8d69d92636b63430bf12"
+    },
+    {
+      "path": "src/igris_os/ui/panel_presentation.py",
+      "sha256": "5801c83c77b3b647d40541fe1e9c5c7bc46fd4c5724a8d8b9260bc89525190f8"
+    }
+  ]
+}

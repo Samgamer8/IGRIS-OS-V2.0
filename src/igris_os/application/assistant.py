@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from igris_os.ai import ModelRouter, OllamaClient
+from igris_os.ai.orchestrator import ModelOrchestrator, ModelPurpose, ModelRoute
 from igris_os.application.director import MissionDirector
 from igris_os.application.intent_classifier import (
     is_conversation_intent, normalize_intent,
@@ -152,6 +153,8 @@ class AssistantService:
         self.client = client or OllamaClient()
         self.director = MissionDirector(client=self.client)
         self.router = ModelRouter(self.client)
+        self.orchestrator = ModelOrchestrator(self.client)
+        self.last_model_route: ModelRoute | None = None
         self.compressor = ContextCompressor()
         self.sandbox = JobObjectSandbox(memory_limit_mb=512, cpu_seconds=60,
                                         max_processes=4)
@@ -169,10 +172,31 @@ class AssistantService:
 
     def choose_model(self, branch: MissionBranch,
                      objective: str = "") -> str:
-        code = branch in {MissionBranch.PROGRAMMING, MissionBranch.GAMES,
-                          MissionBranch.ARTIFICIAL_INTELLIGENCE}
-        difficulty = self.router.infer_difficulty(objective or "normal")
-        return self.router.route(difficulty, code=code).model
+        route = self._orchestrator().route(
+            self._orchestrator().infer_purpose(objective, branch.value))
+        self.last_model_route = route
+        return route.model
+
+    def _orchestrator(self) -> ModelOrchestrator:
+        orchestrator = getattr(self, "orchestrator", None)
+        if orchestrator is None:
+            orchestrator = ModelOrchestrator(self.client)
+            self.orchestrator = orchestrator
+        return orchestrator
+
+    def _model_route_data(self) -> dict[str, Any]:
+        route = getattr(self, "last_model_route", None)
+        if route is None:
+            return {}
+        return {"orchestration": {
+            "purpose": route.purpose.value,
+            "model": route.model,
+            "backend": route.backend,
+            "reason": route.reason,
+            "resources": route.resources,
+            "fallback": route.fallback,
+            "considered_models": list(route.considered),
+        }}
 
     def _parse_messages(self, context: Tuple[str, ...]) -> List[Dict[str, str]]:
         messages: List[Dict[str, str]] = []
@@ -309,6 +333,7 @@ class AssistantService:
 
     def respond(self, objective: str,
                 context: Tuple[str, ...] = ()) -> AssistantReply:
+        self.last_model_route = None
         if not objective.strip():
             return AssistantReply(False, "Escribe una orden.", "", 0)
         lower = objective.strip().lower()
@@ -340,17 +365,26 @@ class AssistantService:
             return AssistantReply(True, text, "local", 0, "filesystem")
         if self._is_conversation(lower):
             model = self._conversation_model()
+            if not model:
+                reason = getattr(self.last_model_route, "reason", "")
+                return AssistantReply(
+                    False, reason or "No hay un modelo local apto para esta conversación.",
+                    "", 0, data=self._model_route_data())
             conversation_context = self._conversation_context(context)
             reply = self.client.generate(
                 self._conversation_prompt(objective.strip(), conversation_context), model)
             missing_model = any(term in (reply.error or "").casefold() for term in
                                 ("not found", "no encontrado", "no existe", "404"))
             if not reply.ok and missing_model:
-                fallback_models = tuple(name for name in self.client.models() if name != model)
-                from igris_os.ai.model_selection import select_installed_model
-                fallback = select_installed_model(fallback_models)
-                if fallback:
-                    model = fallback
+                orchestrator = self._orchestrator()
+                fallback_route = orchestrator.route(
+                    ModelPurpose.GENERAL,
+                    available=(name for name in orchestrator.available_models()
+                               if name != model),
+                )
+                self.last_model_route = fallback_route
+                if fallback_route.model:
+                    model = fallback_route.model
                     reply = self.client.generate(
                         self._conversation_prompt(objective.strip(), conversation_context), model)
             text = reply.text if reply.ok else reply.error
@@ -360,12 +394,16 @@ class AssistantService:
             return AssistantReply(
                 reply.ok, text, reply.model or model,
                 self.compressor.estimate_tokens(text),
-                getattr(reply, "backend", ""), getattr(reply, "reasoning", ""))
+                getattr(reply, "backend", ""), getattr(reply, "reasoning", ""),
+                self._model_route_data())
         plan = self.director.plan(Mission(objective))
         model = self.choose_model(plan.branch, objective)
         if not model:
             return AssistantReply(
-                False, "Servidor LLM no disponible o sin modelos instalados.", "", 0)
+                False,
+                getattr(self.last_model_route, "reason", "") or
+                "Servidor LLM no disponible o sin modelos instalados.",
+                "", 0, data=self._model_route_data())
         memory = self._build_context(context)
         prompt = (SYSTEM + "\nRAMA: " + plan.branch.value +
                   ("\nCONTEXTO LOCAL VERIFICADO:\n" + memory if memory else "") +
@@ -379,7 +417,8 @@ class AssistantService:
             text = self._execute_tool(tool_name, tool_args)
         return AssistantReply(reply.ok, text, model, tokens,
                               getattr(reply, "backend", ""),
-                              getattr(reply, "reasoning", ""))
+                              getattr(reply, "reasoning", ""),
+                              self._model_route_data())
 
     @staticmethod
     def _is_conversation(text: str) -> bool:
@@ -404,12 +443,12 @@ class AssistantService:
         )
 
     def _conversation_model(self) -> str:
-        """Honor an explicit setting; otherwise use an installed local model."""
+        """Treat the configured model as a preference subject to local limits."""
         configured = os.environ.get("IGRIS_CONVERSATION_MODEL", "").strip()
-        if configured:
-            return configured
-        from igris_os.ai.model_selection import select_installed_model
-        return select_installed_model(self.client.models()) or "qwen2.5-coder:7b"
+        route = self._orchestrator().route(
+            ModelPurpose.GENERAL, preferred_model=configured)
+        self.last_model_route = route
+        return route.model
 
     def _conversation_context(self, context: Tuple[str, ...]) -> Tuple[str, ...]:
         """Combina memoria externa con los turnos estructurados de esta instancia."""

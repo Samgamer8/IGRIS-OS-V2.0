@@ -6,6 +6,7 @@ from enum import Enum
 from typing import Sequence
 
 from igris_os.ai import ModelReply, OllamaClient
+from igris_os.ai.orchestrator import ModelOrchestrator, ModelPurpose
 from igris_os.ai.multi_provider import MultiProviderRouter, GenerationRequest, GenerationResponse, ProviderRank
 
 
@@ -108,6 +109,7 @@ class SpecialistRegistry:
 
     def __init__(self, client: OllamaClient | None = None, use_multi_provider: bool = False) -> None:
         self.client = client or OllamaClient()
+        self.orchestrator = ModelOrchestrator(self.client)
         self.use_multi_provider = use_multi_provider
         self.multi_provider = MultiProviderRouter() if use_multi_provider else None
 
@@ -154,17 +156,19 @@ class SpecialistRegistry:
                     response.error or "Multi-provider failed"
                 )
         
-        # Fallback to original Ollama-only logic
-        installed = self.available_models()
-        model = profile.model
-        if installed and model not in installed:
-            family = "qwen2.5-coder" if "coder" in model else "llama"
-            for candidate in installed:
-                if candidate.startswith(family):
-                    model = candidate
-                    break
-            else:
-                model = installed[0]
+        purposes = {
+            SpecialistRole.ARCHITECT: ModelPurpose.REASONING,
+            SpecialistRole.PROGRAMMER: ModelPurpose.PROGRAMMING,
+            SpecialistRole.REVIEWER: ModelPurpose.REVIEW,
+            SpecialistRole.DEVOPS: ModelPurpose.PROGRAMMING,
+            SpecialistRole.SECURITY: ModelPurpose.REVIEW,
+            SpecialistRole.QA: ModelPurpose.GENERAL,
+        }
+        route = self.orchestrator.route(
+            purposes[role], preferred_model=profile.model)
+        model = route.model
+        if not model:
+            return SpecialistOutput(role, False, "", "", 0, route.reason)
         reply: ModelReply = self.client.generate(
             profile.system_prompt + "\n\n" + prompt, model
         )

@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Callable
 
 from igris_os.ai import OllamaClient
+from igris_os.ai.orchestrator import ModelOrchestrator
 from igris_os.domain import Mission, MissionBranch
 
 from .director import MissionDirector
@@ -15,6 +16,10 @@ class SpecialistFinding:
     model: str
     ok: bool
     text: str
+    backend: str | None = None
+    route_reason: str = ""
+    resources: dict | None = None
+    fallback: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,6 +172,7 @@ class SpecialistCoordinator:
     def __init__(self, client: OllamaClient | None = None,
                  evidence_root: Path | None = None) -> None:
         self.client = client or OllamaClient()
+        self.model_orchestrator = ModelOrchestrator(self.client)
         self.evidence_root = evidence_root
         self.director = MissionDirector()
 
@@ -178,6 +184,9 @@ class SpecialistCoordinator:
         team = self.build_team(objective, branch)
         execution_plan = self.build_execution_plan(objective, branch)
         roles = team.roles
+        available_models = self.model_orchestrator.discovered_models()
+        from igris_os.ai.resources import get_system_resources
+        resource_snapshot = get_system_resources()
         findings = []
         for position, role in enumerate(roles, 1):
             if on_progress:
@@ -187,9 +196,25 @@ class SpecialistCoordinator:
                 f"Actua como {role}. Analiza esta mision sin inventar ejecuciones. "
                 f"Controla estos gates: {', '.join(team.controls)}. "
                 "Entrega decisiones, riesgos y pruebas necesarias. MISION: " + objective)
-            reply = self.client.generate(prompt, model)
+            route = self.model_orchestrator.route(
+                self.model_orchestrator.purpose_for_role(role),
+                available=available_models,
+                resource_snapshot=resource_snapshot,
+                preferred_model=model if role in {
+                    "implementador_senior", "programador"} else "",
+            )
+            specialist_model = route.model
+            if not specialist_model:
+                findings.append(SpecialistFinding(
+                    role, "", False, route.reason,
+                    route.backend, route.reason, route.resources, route.fallback))
+                continue
+            reply = self.client.generate(prompt, specialist_model)
             findings.append(SpecialistFinding(
-                role, model, reply.ok, reply.text if reply.ok else reply.error))
+                role, reply.model or specialist_model, reply.ok,
+                reply.text if reply.ok else reply.error,
+                reply.backend or route.backend, route.reason, route.resources,
+                route.fallback))
         transcript = "\n\n".join(
             f"{item.role}: {item.text}" for item in findings)
         if on_progress:
@@ -198,10 +223,24 @@ class SpecialistCoordinator:
             "Eres revisor independiente. Detecta contradicciones, carencias y "
             "afirmaciones sin evidencia. Da un veredicto condicionado a pruebas.\n" +
             transcript)
-        reviewed = self.client.generate(review_prompt, model)
-        review = SpecialistFinding(
-            "revisor_independiente", model, reviewed.ok,
-            reviewed.text if reviewed.ok else reviewed.error)
+        review_route = self.model_orchestrator.route(
+            self.model_orchestrator.purpose_for_role("revisor_independiente"),
+            available=available_models,
+            resource_snapshot=resource_snapshot,
+        )
+        review_model = review_route.model
+        if review_model:
+            reviewed = self.client.generate(review_prompt, review_model)
+            review = SpecialistFinding(
+                "revisor_independiente", reviewed.model or review_model, reviewed.ok,
+                reviewed.text if reviewed.ok else reviewed.error,
+                reviewed.backend or review_route.backend, review_route.reason,
+                review_route.resources, review_route.fallback)
+        else:
+            review = SpecialistFinding(
+                "revisor_independiente", "", False, review_route.reason,
+                review_route.backend, review_route.reason,
+                review_route.resources, review_route.fallback)
         complete = all(item.ok for item in findings) and review.ok
         if on_progress:
             on_progress(96, "Registrando evidencia")
