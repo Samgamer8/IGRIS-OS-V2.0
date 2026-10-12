@@ -403,10 +403,16 @@ class AcademyDialog(QDialog):
             "Deriva capacidades originales de IGRIS a partir del análisis, con "
             "evidencia y un esqueleto de código. No copia ni desensambla.")
         blueprint.clicked.connect(self.blueprint_selected)
+        make_ia = QPushButton("Crear IA (lienzo de nodos)")
+        make_ia.setToolTip(
+            "Encadena capacidades reales de IGRIS como nodos de un grafo y "
+            "ejecuta el pipeline. Local-first, con tu propio código.")
+        make_ia.clicked.connect(self.open_pipeline_editor)
         row.addWidget(add)
         row.addWidget(remove)
         row.addWidget(analyze)
         row.addWidget(blueprint)
+        row.addWidget(make_ia)
         layout.addLayout(row)
         self.refresh()
 
@@ -455,6 +461,49 @@ class AcademyDialog(QDialog):
             self.details.setPlainText(f"No se pudo generar el plan: {exc}")
             return
         self.details.setPlainText(summary["text"])
+
+    def open_pipeline_editor(self):
+        """Abre el lienzo de nodos para 'crear una IA' con capacidades reales."""
+        capabilities = self._available_capabilities()
+        if not capabilities:
+            self.details.setPlainText(
+                "No hay un kernel conectado con capacidades registradas.\n"
+                "Abre IGRIS completamente para usar el lienzo de nodos.")
+            return
+        from igris_os.application.pipeline import CapabilityPipeline
+        from igris_os.ui.pipeline_editor import PipelineEditorDialog
+        pipeline = CapabilityPipeline(name="mi_ia")
+        executor = self._make_executor()
+        dialog = PipelineEditorDialog(pipeline, capabilities,
+                                      executor=executor, parent=self)
+        dialog.exec()
+
+    def _available_capabilities(self) -> list[str]:
+        kernel = getattr(self.parent(), "kernel", None)
+        registry = getattr(kernel, "registry", None)
+        if registry is None:
+            return []
+        specs = registry.specs() if callable(
+            getattr(registry, "specs", None)) else []
+        names = [getattr(s, "name", "") for s in specs]
+        return sorted({n for n in names if n and n != "system.capabilities"})
+
+    def _make_executor(self):
+        """Ejecutor con la firma real del kernel: execute(mission, cap, payload)."""
+        kernel = getattr(self.parent(), "kernel", None)
+        if kernel is None:
+            return None
+        try:
+            from igris_os.domain.models import Mission
+        except ImportError:
+            Mission = None
+
+        def execute(capability: str, payload: dict):
+            if Mission is None:
+                raise RuntimeError("Mission no disponible")
+            return kernel.execute(Mission(f"pipeline:{capability}"),
+                                  capability, dict(payload))
+        return execute
 
     def add_program(self):
         path, _ = QFileDialog.getOpenFileName(
