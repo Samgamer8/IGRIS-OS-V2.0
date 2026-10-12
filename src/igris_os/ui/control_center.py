@@ -106,6 +106,118 @@ def system_snapshot() -> dict[str, object]:
     return result
 
 
+def artifact_summary(path: str) -> dict[str, object]:
+    """Analiza un artefacto con ArtifactAnalyzer y devuelve una ficha legible.
+
+    Solo lectura y con evidencia: si algo no se puede determinar, se declara en
+    las limitaciones en lugar de inventarlo.
+    """
+    from igris_os.files import ArtifactAnalyzer
+    target = Path(path)
+    if not target.is_file():
+        raise ValueError("La ruta no es un archivo: " + str(path))
+    report = ArtifactAnalyzer().analyze(target)
+    lines = [
+        f"Archivo: {target.name}",
+        f"Tamaño: {report.size / 1024:.1f} KB   ·   SHA256: {report.sha256[:16]}…",
+        f"Tipo: {report.kind} — {report.kind_description}",
+    ]
+    if report.architecture:
+        lines.append(f"Arquitectura: {report.architecture} {report.bitness}".rstrip())
+    if report.timestamp:
+        lines.append(f"Marca de tiempo: {report.timestamp}")
+    if report.is_dotnet:
+        lines.append("Runtime: .NET (CLR) detectado")
+    if report.packer:
+        lines.append(f"Empaquetado/instalador: {report.packer}")
+    if report.framework:
+        lines.append(f"Contenedor: {report.framework}")
+    if report.sections:
+        lines.append(f"Secciones: {report.sections}")
+    if report.notes:
+        lines.append("")
+        lines.append("Evidencia:")
+        lines.extend(f"  · {note}" for note in report.notes)
+    if report.urls:
+        lines.append("")
+        lines.append(f"Endpoints/URLs ({len(report.urls)}):")
+        lines.extend(f"  · {url}" for url in report.urls[:15])
+    if report.notable_strings:
+        lines.append("")
+        lines.append("Strings de interés:")
+        lines.extend(f"  · {s}" for s in report.notable_strings[:10])
+    if report.zip_entries:
+        lines.append("")
+        lines.append(f"Contenido del paquete ({len(report.zip_entries)} entradas):")
+        lines.extend(f"  · {e['name']}" for e in report.zip_entries[:25])
+    lines.append("")
+    lines.append("Límites del análisis:")
+    lines.extend(f"  · {lim}" for lim in report.limitations)
+    return {
+        "path": str(target), "name": target.name, "kind": report.kind,
+        "architecture": report.architecture, "bitness": report.bitness,
+        "is_dotnet": report.is_dotnet, "packer": report.packer,
+        "framework": report.framework, "urls": list(report.urls),
+        "size": report.size, "sha256": report.sha256, "text": "\n".join(lines),
+    }
+
+
+def deep_diagnostic() -> dict[str, object]:
+    """Diagnóstico completo y real del PC y de la salud de IGRIS OS."""
+    import igris_os
+    root = project_root()
+    result: dict[str, object] = {}
+    try:
+        boot = psutil.boot_time()
+        from datetime import datetime as _dt
+        result["uptime"] = str(_dt.now() - _dt.fromtimestamp(boot)).split(".")[0]
+    except (OSError, ValueError):
+        result["uptime"] = "desconocido"
+    vm = psutil.virtual_memory()
+    result["ram_total_gb"] = round(vm.total / 1024 ** 3, 1)
+    result["ram_used_gb"] = round(vm.used / 1024 ** 3, 1)
+    result["ram_percent"] = vm.percent
+    result["cpu_logical"] = psutil.cpu_count()
+    result["cpu_percent"] = psutil.cpu_percent(interval=0.3)
+    drives = []
+    for part in psutil.disk_partitions():
+        if "cdrom" in part.opts:
+            continue
+        try:
+            usage = psutil.disk_usage(part.mountpoint)
+            drives.append({"path": part.mountpoint,
+                           "total_gb": round(usage.total / 1024 ** 3, 1),
+                           "free_gb": round(usage.free / 1024 ** 3, 1),
+                           "percent": usage.percent})
+        except OSError:
+            continue
+    result["drives"] = drives
+    try:
+        net = psutil.net_io_counters()
+        result["net_sent_mb"] = round(net.bytes_sent / 1024 ** 2, 1)
+        result["net_recv_mb"] = round(net.bytes_recv / 1024 ** 2, 1)
+    except (OSError, AttributeError):
+        result["net_sent_mb"] = result["net_recv_mb"] = 0
+    procs = []
+    for proc in sorted(psutil.process_iter(["name", "memory_percent"]),
+                       key=lambda p: p.info.get("memory_percent") or 0,
+                       reverse=True)[:8]:
+        try:
+            procs.append(f"{proc.info['name']} ({(proc.info.get('memory_percent') or 0):.1f}% RAM)")
+        except (OSError, KeyError):
+            continue
+    result["top_processes"] = procs
+    result["python"] = platform.python_version()
+    result["platform"] = platform.platform()
+    result["igris_version"] = getattr(igris_os, "__version__", "5.1.0")
+    src = root / "src" / "igris_os"
+    result["igris_modules"] = sum(1 for p in src.rglob("*.py")) if src.is_dir() else 0
+    tests_dir = root / "tests"
+    result["igris_tests"] = sum(1 for p in tests_dir.glob("test_*.py")) if tests_dir.is_dir() else 0
+    result["igris_root"] = str(root)
+    return result
+
+
 _DIALOG_STYLE = """
 QDialog{background:#07080d;color:#ececf2;} QLabel{color:#dedee8;}
 QTabWidget::pane{border:1px solid #7f1729;background:#0b0d14;}
@@ -129,13 +241,21 @@ class PropertiesDialog(QDialog):
         tabs = QTabWidget(self)
         general = QWidget()
         form = QFormLayout(general)
+        import igris_os
+        version = getattr(igris_os, "__version__", "5.1.0")
         form.addRow("Producto", QLabel("IGRIS OS"))
-        form.addRow("Versión", QLabel("5.0.0 RC1"))
+        form.addRow("Versión", QLabel(version))
         form.addRow("Arquitectura", QLabel(platform.machine()))
         form.addRow("Python", QLabel(platform.python_version()))
         form.addRow("Sistema", QLabel(platform.platform()))
         form.addRow("Runtime", QLabel(str(runtime)))
         form.addRow("Proyectos", QLabel(str(projects_directory())))
+        try:
+            from igris_os.bootstrap import build_igris
+            capabilities = len(build_igris(runtime).registry.specs())
+            form.addRow("Capacidades", QLabel(str(capabilities)))
+        except (OSError, ImportError, ValueError):
+            pass
         tabs.addTab(general, "General")
         state = QTextEdit()
         state.setReadOnly(True)
@@ -143,7 +263,9 @@ class PropertiesDialog(QDialog):
             "Estado: operativo\n"
             "Interfaz: centro de control animado\n"
             "Seguridad: confirmación para acciones externas\n"
-            "Registro: runtime/logs y runtime/audit")
+            "Registro: runtime/logs y runtime/audit\n"
+            "Análisis de artefactos: reverse.inspect (solo lectura)\n"
+            "Análisis de proyectos: reverse.project")
         tabs.addTab(state, "Sistema")
         layout.addWidget(tabs)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
@@ -211,14 +333,24 @@ class AcademyDialog(QDialog):
         intro.setWordWrap(True)
         layout.addWidget(intro)
         self.list = QListWidget()
+        self.list.currentRowChanged.connect(self._show_details)
         layout.addWidget(self.list)
+        self.details = QTextEdit()
+        self.details.setReadOnly(True)
+        self.details.setPlaceholderText(
+            "Selecciona un programa registrado y pulsa «Analizar» para ver su ficha "
+            "técnica (tipo, arquitectura, empaquetado, endpoints). Solo lectura.")
+        layout.addWidget(self.details)
         row = QHBoxLayout()
         add = QPushButton("Añadir programa…")
         add.clicked.connect(self.add_program)
         remove = QPushButton("Quitar registro")
         remove.clicked.connect(self.remove_program)
+        analyze = QPushButton("Analizar (ingeniería inversa)")
+        analyze.clicked.connect(self.analyze_selected)
         row.addWidget(add)
         row.addWidget(remove)
+        row.addWidget(analyze)
         layout.addLayout(row)
         self.refresh()
 
@@ -227,6 +359,32 @@ class AcademyDialog(QDialog):
         for item in self.programs:
             exists = Path(item["path"]).is_file()
             self.list.addItem(f"{'●' if exists else '○'} {item['name']}\n    {item['path']}")
+
+    def _show_details(self, row: int):
+        if 0 <= row < len(self.programs):
+            self.details.setPlainText(
+                f"Registro: {self.programs[row]['name']}\n"
+                f"Ruta: {self.programs[row]['path']}\n\n"
+                "Pulsa «Analizar» para la ficha técnica de solo lectura.")
+
+    def analyze_selected(self):
+        row = self.list.currentRow()
+        if not (0 <= row < len(self.programs)):
+            self.details.setPlainText("Selecciona primero un programa de la lista.")
+            return
+        path = self.programs[row]["path"]
+        try:
+            summary = artifact_summary(path)
+        except (OSError, ValueError) as exc:
+            self.details.setPlainText(f"No se pudo analizar: {exc}")
+            return
+        text = summary["text"]
+        if summary.get("urls"):
+            text += (
+                "\n\nPara que IGRIS estudié estas técnicas y proponga su PROPIA "
+                "implementación, pídeselo por chat (no clona código: reimplementa "
+                "lo que observes aquí).")
+        self.details.setPlainText(text)
 
     def add_program(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -248,6 +406,7 @@ class AcademyDialog(QDialog):
             self.programs.pop(row)
             save_programs(self.runtime, self.programs)
             self.refresh()
+            self.details.clear()
 
 
 class IntegrityDialog(QDialog):
@@ -279,19 +438,43 @@ class IntegrityDialog(QDialog):
         threading.Thread(target=self._collect, daemon=True).start()
 
     def _collect(self):
-        self._result = system_snapshot()
+        self._result = deep_diagnostic()
 
     def _consume(self):
         if self._result is None:
             return
         data, self._result = self._result, None
-        self.output.setPlainText(
-            f"CPU: {data['cpu']}%\nMemoria: {data['memory']}%\nDisco: {data['disk']}%\n\n"
-            f"Microsoft Defender: {data['defender']}\nFirmas: {data['signatures']}\n\n"
-            f"Python: {data['python']}\nSistema: {data['platform']}\n"
-            f"Código IGRIS: {data['source']}\n\n"
-            "Integridad del RC: use MANIFEST.sha256 y SHA256SUMS.txt para verificar el paquete."
-            + ("\n\n" + str(data["scan_message"]) if data.get("scan_message") else ""))
+        lines = [
+            "══ DIAGNÓSTICO COMPLETO DEL EQUIPO ══",
+            f"Sistema: {data['platform']}",
+            f"Tiempo encendido: {data['uptime']}",
+            "",
+            "── HARDWARE ──",
+            f"CPU: {data['cpu_logical']} núcleos lógicos  ·  uso {data['cpu_percent']}%",
+            f"RAM: {data['ram_used_gb']} / {data['ram_total_gb']} GB  ({data['ram_percent']}%)",
+        ]
+        for drive in data.get("drives", []):
+            lines.append(
+                f"Disco {drive['path']}: {drive['free_gb']} GB libres de "
+                f"{drive['total_gb']} GB  ({drive['percent']}% usado)")
+        lines += [
+            "",
+            "── RED ──",
+            f"Enviado: {data['net_sent_mb']} MB  ·  Recibido: {data['net_recv_mb']} MB",
+            "",
+            "── PROCESOS (mayor uso de RAM) ──",
+        ]
+        lines += [f"  · {p}" for p in data.get("top_processes", [])] or ["  · sin datos"]
+        lines += [
+            "",
+            "── SALUD DE IGRIS OS ──",
+            f"Versión: {data['igris_version']}  ·  Python {data['python']}",
+            f"Módulos Python: {data['igris_modules']}  ·  Ficheros de test: {data['igris_tests']}",
+            f"Raíz del código: {data['igris_root']}",
+            "",
+            "Nota: diagnóstico de solo lectura. No modifica nada del equipo.",
+        ]
+        self.output.setPlainText("\n".join(lines))
 
     def quick_scan(self):
         if os.name != "nt":
@@ -308,5 +491,6 @@ class IntegrityDialog(QDialog):
                     "Defender no pudo iniciar el análisis: " + (completed.stderr or "error desconocido"))
             except (OSError, subprocess.SubprocessError) as exc:
                 message = "Error al iniciar Defender: " + str(exc)
-            self._result = {**system_snapshot(), "scan_message": message}
+            self._result = {**deep_diagnostic(), "scan_message": message}
         threading.Thread(target=run, daemon=True).start()
+
