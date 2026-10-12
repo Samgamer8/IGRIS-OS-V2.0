@@ -6,8 +6,35 @@ build-backend = "setuptools.build_meta"
 name = "igris-os"
 version = "5.1.0a8"
 description = "Orquestador local con permisos y entregas ejecutables verificables"
+readme = "README.md"
 requires-python = ">=3.11"
+license = { text = "Proprietary - All rights reserved" }
+authors = [
+    { name = "Samuel (Samgamer8)", email = "sam_raquel_patri8@outlook.es" },
+]
+keywords = [
+    "ai-agent", "local-first", "orchestrator", "autonomous-agent",
+    "verifiable-execution", "multi-provider", "reverse-engineering",
+    "llm", "copilot", "windows",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = ["requests>=2.31", "psutil>=5.9", "PyQt6>=6.4"]
+
+[project.urls]
+Homepage = "https://github.com/Samgamer8/IGRIS-OS-V2.0"
+Repository = "https://github.com/Samgamer8/IGRIS-OS-V2.0"
+Issues = "https://github.com/Samgamer8/IGRIS-OS-V2.0/issues"
 
 [project.scripts]
 igris = "igris_os.cli:main"

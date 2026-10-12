@@ -1,0 +1,69 @@
+IGRIS OS — LICENCIA PROPIETARIA (Todos los derechos reservados)
+Copyright (c) 2026 Samuel (autor de IGRIS OS). Todos los derechos reservados.
+
+-------------------------------------------------------------------------------
+AVISO LEGAL
+-------------------------------------------------------------------------------
+Este software y todo su codigo fuente, documentacion, diseno, nombre "IGRIS
+OS" y material asociado (el "Software") son propiedad exclusiva de su autor y
+estan protegidos por las leyes de propiedad intelectual y tratados
+internacionales sobre derechos de autor.
+
+-------------------------------------------------------------------------------
+1. CONCESION DE USO (PERSONAL Y NO COMERCIAL)
+-------------------------------------------------------------------------------
+Se concede un permiso limitado, no exclusivo, intransferible y revocable para
+instalar y usar el Software UNICAMENTE con fines personales, educativos o de
+evaluacion interna. Cualquier otro uso requiere una licencia comercial por
+escrito del autor.
+
+-------------------------------------------------------------------------------
+2. RESTRICCIONES (lo que NO puede hacerse sin licencia comercial escrita)
+-------------------------------------------------------------------------------
+Queda expresamente PROHIBIDO sin una licencia comercial firmada por el autor:
+
+  a) Usar el Software, total o parcialmente, con fines comerciales.
+  b) Vender, sublicenciar, alquilar, arrendar o redistribuir el Software.
+  c) Ofrecer el Software (o una version derivada) como servicio (SaaS),
+     producto gestionado o parte de un producto de pago.
+  d) Usar el nombre "IGRIS OS", su logotipo o marca con fines comerciales.
+  e) Realizar ingenieria inversa del Software con el fin de crear un producto
+     comercial competidor.
+  f) Publicar el codigo fuente bajo una licencia de codigo abierto.
+
+Nota: el Software SI puede analizar y estudiar OTROS programas para mejorar sus
+propias capacidades (funcion de reverse engineering incluida). Esta licencia
+restringe lo que se puede hacer CON IGRIS, no lo que IGRIS puede estudiar.
+
+-------------------------------------------------------------------------------
+3. PROPIEDAD INTELECTUAL
+-------------------------------------------------------------------------------
+El autor conserva todos los derechos, titulo e interes sobre el Software,
+incluidas las modificaciones y trabajos derivados que usted pudiera crear.
+Ninguna clausula de esta licencia transfiere la propiedad del Software.
+
+-------------------------------------------------------------------------------
+4. EXENCION DE GARANTIAS
+-------------------------------------------------------------------------------
+EL SOFTWARE SE PROPORCIONA "TAL CUAL", SIN GARANTIA DE NINGUN TIPO, EXPRESA O
+IMPLICITA, INCLUIDAS LAS GARANTIAS DE COMERCIABILIDAD, IDONEIDAD PARA UN FIN
+PARTICULAR Y NO INFRACCION. EL SOFTWARE PUEDE EJECUTAR CODIGO Y REALIZAR
+ACCIONES EN SU SISTEMA; USTED ASUME TODO EL RIESGO DE SU USO.
+
+-------------------------------------------------------------------------------
+5. LIMITACION DE RESPONSABILIDAD
+-------------------------------------------------------------------------------
+EN NINGUN CASO EL AUTOR SERA RESPONSABLE POR DANOS DIRECTOS, INDIRECTOS,
+INCIDENTALES, ESPECIALES O CONSECUENTES (INCLUIDA LA PERDIDA DE DATOS O
+BENEFICIOS) DERIVADOS DEL USO O LA IMPOSIBILIDAD DE USO DEL SOFTWARE.
+
+-------------------------------------------------------------------------------
+6. CONTACTO COMERCIAL
+-------------------------------------------------------------------------------
+Para adquirir una licencia comercial, soporte o una integracion a medida,
+contacte con el autor. Esta licencia NO cubre el uso comercial; consulte antes
+de cualquier despliegue con animo de lucro.
+
+================================================================================
+Al instalar o usar el Software, usted acepta los terminos de esta licencia.
+================================================================================
