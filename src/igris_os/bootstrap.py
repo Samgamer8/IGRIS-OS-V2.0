@@ -10,6 +10,7 @@ from igris_os.security import PermissionPolicy, SecurityAuditLogger
 from igris_os.storage.audit import AuditLog
 from igris_os.storage.workspace import MissionWorkspace
 from igris_os.capabilities.host import register_host_capabilities
+from igris_os.capabilities.reverse_engineering import register_reverse_engineering
 
 
 def build_igris(runtime: Path | None = None) -> IgrisKernel:
@@ -21,6 +22,7 @@ def build_igris(runtime: Path | None = None) -> IgrisKernel:
     register_creation_capabilities(registry)
     register_git_capabilities(registry)
     register_voice_capabilities(registry)
+    register_reverse_engineering(registry)
     approval = None
     endpoint = os.environ.get("IGRIS_SAMADMIN_URL", "").strip()
     if endpoint:
