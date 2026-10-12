@@ -496,6 +496,11 @@ class AssistantService:
             "Si el usuario saluda, saluda y continua la charla; si pregunta por ti, responde sobre ti. "
             "Si comenta una respuesta anterior, contesta a ese comentario de forma directa. "
             "No inventes hechos: si no sabes algo, dilo; si falta contexto, pregunta una sola cosa concreta. "
+            "No inventes listas de repositorios, enlaces ni proyectos concretos: si el usuario pide repos reales "
+            "de GitHub, indica que necesitas su confirmacion para buscarlos con la API, sin inventarlos. "
+            "Redacta en frases completas con verbo; evita enumerar nombres sueltos o fragmentos de una o dos "
+            "palabras, que la voz no puede pronunciar. "
+            "Si el usuario critica tu respuesta, responde a la critica y cambia tu forma de responder. "
             "Si el usuario critica tu respuesta, responde a la critica y cambia tu forma de responder. "
             "No ejecutes herramientas ni planifiques proyectos en esta respuesta.\n"
             + ("HISTORIAL RECIENTE:\n" + recent + "\n" if recent else "")

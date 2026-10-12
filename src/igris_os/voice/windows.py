@@ -217,7 +217,18 @@ class WindowsVoice:
             if current and current[-1:] in ".?!¡¿":
                 flush()
         flush()
-        return tuple(segments)
+        # Guard extra (autorizacion 2026-10-12): los restos de numeracion de
+        # listas ("1.", "2.") y otros fragmentos de una sola palabra corta
+        # colapsan la sintesis TTS (tensor vacio). Se pegan al fragmento
+        # siguiente en vez de enviarse solos; no se elimina ni reescribe
+        # ninguna palabra del texto original.
+        fixed: list[str] = []
+        for segment in segments:
+            if fixed and len(fixed[-1].split()) <= 1:
+                fixed[-1] = (fixed[-1] + " " + segment).strip()
+            else:
+                fixed.append(segment)
+        return tuple(fixed)
 
     def listen(self) -> str:
         try:

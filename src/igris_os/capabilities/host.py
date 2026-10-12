@@ -27,6 +27,7 @@ def register_host_capabilities(registry):
         ("mkdir", "Crea una carpeta en la ruta autorizada del equipo", make_directory, True),
         ("copy", "Copia un archivo a la ruta autorizada sin sobrescribir", copy_file, True),
         ("open", "Abre un archivo, carpeta o programa con Windows", open_path, True),
+        ("open_url", "Abre una URL HTTPS de github.com en el navegador (solo lectura, bajo permiso)", open_url, True),
     ):
         registry.register(CapabilitySpec(
             "host." + name, description,
@@ -200,6 +201,31 @@ def copy_file(payload):
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
+
+
+def open_url(payload):
+    """Abre una URL HTTPS (solo github.com) en el navegador por defecto.
+
+    Solo lectura en el sentido de que no modifica nada local: delega la
+    apertura al navegador del sistema mediante ``os.startfile`` en Windows.
+    Como abre una aplicacion externa, queda marcada EXTERNAL y el panel pide
+    permiso antes de ejecutarla.
+    """
+    try:
+        from urllib.parse import urlparse
+        raw = str(payload.get("url", "") or "").strip().strip('"')
+        if not raw:
+            raise ValueError("Indica una URL https://github.com/...")
+        parsed = urlparse(raw)
+        if parsed.scheme != "https" or parsed.hostname not in {"github.com", "www.github.com"}:
+            raise ValueError("Solo se pueden abrir URLs HTTPS de github.com")
+        if os.name != "nt":
+            return ExecutionResult.failure("Abrir URLs requiere Windows", "HOST_WINDOWS_REQUIRED")
+        os.startfile(raw)
+        return ExecutionResult.success("Windows acepto la solicitud de apertura; no verifica el resultado del navegador",
+                                       host_report={"url": raw, "opening_requested": True})
+    except (OSError, ValueError) as exc:
+        return _failure(exc)
 
 
 def open_path(payload):
