@@ -1795,14 +1795,18 @@ def run_cinematic_panel():
                                 and getattr(self.voice_engine, 'allow_fallback', True)):
                             self.igrisd.speak(text)
                     threading.Thread(target=_speak, daemon=True).start()
-                if hasattr(self, 'igrisd') and self.igrisd is not None:
-                    self.igrisd.remember(
-                        "chat", {"role": "igris", "text": text,
-                                 "ok": bool(getattr(reply, "ok", False))}, verified=True)
-                elif self.memory is not None:
-                    self.memory.remember(
-                        "chat", {"role": "igris", "text": text,
-                                 "ok": bool(getattr(reply, "ok", False))}, verified=True)
+                # Solo las respuestas exitosas son conversacion. Un fallo
+                # (p.ej. "no hay modelo local apto") NO se persiste: si no,
+                # se inyectaria en cada prompt futuro como si fuera charla.
+                if getattr(reply, "ok", False):
+                    if hasattr(self, 'igrisd') and self.igrisd is not None:
+                        self.igrisd.remember(
+                            "chat", {"role": "igris", "text": text, "ok": True},
+                            verified=True)
+                    elif self.memory is not None:
+                        self.memory.remember(
+                            "chat", {"role": "igris", "text": text, "ok": True},
+                            verified=True)
                 if data and matched_job is not None:
                     technical = self.technical_summary(
                         self.active_job.objective, self.active_job.capability,
@@ -2171,6 +2175,10 @@ def run_cinematic_panel():
                 try:
                     item = row.get("content", {}) if isinstance(row, dict) else {}
                     if not isinstance(item, dict):
+                        continue
+                    # Respuestas fallidas guardadas antes de este arreglo:
+                    # no son conversacion y no deben inyectarse en el prompt.
+                    if item.get("ok") is False:
                         continue
                     role = str(item.get("role", "?"))[:40]
                     text = str(item.get("text", ""))[:1000]

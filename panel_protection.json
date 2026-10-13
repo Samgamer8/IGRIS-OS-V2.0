@@ -3,7 +3,7 @@
   "files": [
     {
       "path": "src/igris_os/ui/cinematic.py",
-      "sha256": "ea961d3ec340f53b907a4a33f256d33f74b1e6eedf2a8d69d92636b63430bf12"
+      "sha256": "ff9d7520492878509016f744e1c327d4d9193bd56814bf31b78220e2e8279fe1"
     },
     {
       "path": "src/igris_os/ui/panel_presentation.py",
