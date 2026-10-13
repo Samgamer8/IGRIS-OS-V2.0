@@ -106,6 +106,29 @@ _ADVICE_PREFIXES = (
 
 _GREETING_CANNED = {}  # DESACTIVADO: sin frases preestablecidas; que responda el LLM como humano
 
+# Saludo natural SOLO para cuando NO hay modelo disponible. Un saludo nunca
+# debe terminar en error: el LLM responde cuando esta cargado; si no lo esta,
+# IGRIS saluda igual y explica el estado real del equipo.
+_GREETING_FALLBACK = {
+    "hola": "Hola. Soy IGRIS OS, tu asistente local. Ahora mismo no hay ningun modelo de IA cargado en este equipo, pero sigo operativo para tareas locales: archivos, Windows, multimedia y programacion. Dime en que trabajas.",
+    "buenos dias": "Buenos dias. Soy IGRIS OS. Sin modelo de IA cargado no puedo conversar con fluidez, pero sigo operativo para tareas locales. Dime que necesitas.",
+    "buenas tardes": "Buenas tardes. Soy IGRIS OS. Sin modelo de IA cargado no puedo conversar con fluidez, pero sigo operativo para tareas locales. Dime que necesitas.",
+    "buenas noches": "Buenas noches. Soy IGRIS OS. Sin modelo de IA cargado no puedo conversar con fluidez, pero sigo operativo para tareas locales.",
+    "buenas": "Buenas. Soy IGRIS OS. Sin modelo de IA cargado no puedo conversar con fluidez, pero sigo operativo para tareas locales.",
+    "que tal": "Que tal. Soy IGRIS OS. No hay modelo de IA cargado ahora mismo; para tareas locales sigo a pleno rendimiento.",
+    "gracias": "De nada. Aqui sigo. Sin modelo de IA cargado no puedo conversar con fluidez, pero sigo operativo para tareas locales.",
+    "ok": "Entendido. Nota: no hay modelo de IA cargado ahora mismo, asi que por ahora solo puedo atender tareas locales.",
+    "perfecto": "Entendido. Nota: no hay modelo de IA cargado ahora mismo, asi que por ahora solo puedo atender tareas locales.",
+    "de acuerdo": "Entendido. Nota: no hay modelo de IA cargado ahora mismo, asi que por ahora solo puedo atender tareas locales.",
+    "entendido": "Entendido. Nota: no hay modelo de IA cargado ahora mismo, asi que por ahora solo puedo atender tareas locales.",
+}
+
+
+def greeting_fallback(text: str) -> str | None:
+    """Saludo natural degradado; solo para saludos, solo sin modelo."""
+    key = re.sub(r"[^\w\s]", "", normalize_intent(text.strip().lower())).strip()
+    return _GREETING_FALLBACK.get(key)
+
 
 _GREETING_RE = re.compile(
     r"^(?:(?:hola|buenas|buenos dias|buenas tardes|buenas noches|que tal|"

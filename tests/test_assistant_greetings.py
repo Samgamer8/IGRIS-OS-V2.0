@@ -78,6 +78,24 @@ class TestAssistantGreetingPath(unittest.TestCase):
         self.assertEqual(service.state.turns[1].role, "assistant")
         self.assertEqual(service.state.turns[1].text, reply.text)
 
+    def test_greeting_without_model_returns_natural_greeting(self):
+        # Regresion vivida en real: sin modelo, "hola" acababa en error.
+        # Un saludo SIEMPRE recibe un saludo, con modelo o sin el.
+        class _NoModelClient:
+            def models(self):
+                return ()
+
+            def generate(self, *args, **kwargs):
+                raise AssertionError('sin modelo no debe llegarse a generate')
+
+        service = self._service(_NoModelClient())
+        with patch('igris_os.ai.resources.get_system_resources', return_value={
+                'ram_free_gb': 0.0, 'vram_free_gb': 0.0, 'uncertain': False}):
+            reply = service.respond('Hola!')
+        self.assertTrue(reply.ok)
+        self.assertIn('IGRIS', reply.text)
+        self.assertEqual(len(service.state.turns), 2)
+
     def test_non_greeting_goes_to_llm(self):
         service = self._service(_ClosedClient())
         with self.assertRaises(RuntimeError):

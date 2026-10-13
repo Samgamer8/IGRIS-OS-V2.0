@@ -13,6 +13,7 @@ from igris_os.application.director import MissionDirector
 from igris_os.application.consent import ConsentGate
 from igris_os.application.intent_classifier import (
     is_conversation_intent, normalize_intent, _GREETING_CANNED,
+    greeting_fallback,
 )
 from igris_os.domain import Mission, MissionBranch
 from igris_os.memory.compressor import ContextCompressor
@@ -415,6 +416,13 @@ class AssistantService:
         if self._is_conversation(lower):
             model = self._conversation_model()
             if not model:
+                # Un saludo NUNCA termina en error: sin modelo se responde con
+                # un saludo natural que informa del estado real del equipo.
+                saludo = greeting_fallback(objective)
+                if saludo:
+                    self.state.add_conversation_turn("user", objective.strip())
+                    self.state.add_conversation_turn("assistant", saludo)
+                    return AssistantReply(True, saludo, "local", 0, "local")
                 reason = getattr(self.last_model_route, "reason", "")
                 return AssistantReply(
                     False, reason or "No hay un modelo local apto para esta conversación.",
