@@ -40,31 +40,39 @@ class ModelOrchestrator:
     ``IGRIS_ORCHESTRATOR_MAX_PARAMS_B`` tras medir el hardware.
 
     Los propósitos comparten una cola de candidatos y se ordenan segun el
-    objetivo: 1.5B primero para chat/conversacion (consumo minimo, velocidad
-    maxima) y 7B/8B primero para programacion, razonamiento y revision
-    (calidad). El enrutador cruza este orden con los modelos instalados y la
+    objetivo: instruct ligero primero para chat/conversacion (qwen3.5:4b si
+    esta instalado y luego 1.5B instruido: consumo minimo y velocidad) y
+    7B/8B primero para programacion, razonamiento y revision (calidad).
+    Solo variantes instruidas: los modelos "-base" no obedecen prompts.
+    El enrutador cruza este orden con los modelos instalados y la
     aptitud de recursos, asi que el modelo elegido puede variar segun el
     hardware.
     """
 
+    # Solo variantes INSTRUIDAS. Los modelos con sufijo "-base" no estan
+    # entrenados para obedecer prompts: autocompletan texto y producen ecos
+    # del historial (salidas fabricadas en chat, contratos JSON rotos en
+    # programacion). Nunca candidatos, ni siquiera como ultimo recurso.
     CANDIDATES: dict[ModelPurpose, tuple[str, ...]] = {
         ModelPurpose.PROGRAMMING: (
             "qwen2.5-coder:7b", "deepseek-coder:6.7b",
-            "qwen2.5-coder:1.5b", "qwen2.5-coder:1.5b-base",
+            "qwen2.5-coder:1.5b",
             "llama3.1:8b", "deepseek-r1:8b",
         ),
         ModelPurpose.REASONING: (
             "deepseek-r1:8b", "llama3.1:8b", "qwen2.5-coder:7b",
-            "qwen2.5-coder:1.5b", "qwen2.5-coder:1.5b-base",
+            "qwen2.5-coder:1.5b",
         ),
         # El revisor prioriza una familia distinta al modelo de razonamiento
         # principal cuando ambos estan instalados, para reducir sesgo comun.
         ModelPurpose.REVIEW: (
             "llama3.1:8b", "deepseek-r1:8b", "qwen2.5-coder:7b",
-            "qwen2.5-coder:1.5b", "qwen2.5-coder:1.5b-base",
+            "qwen2.5-coder:1.5b",
         ),
+        # Chat: instruct ligero primero (qwen3.5:4b si esta instalado, luego
+        # 1.5B instruido); los 7B/8B quedan reservados para programacion.
         ModelPurpose.GENERAL: (
-            "qwen2.5-coder:1.5b-base", "qwen2.5-coder:1.5b",
+            "qwen3.5:4b", "qwen2.5-coder:1.5b",
             "llama3.1:8b", "qwen2.5-coder:7b", "deepseek-r1:8b",
         ),
     }

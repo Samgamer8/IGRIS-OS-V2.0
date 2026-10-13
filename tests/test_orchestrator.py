@@ -12,7 +12,8 @@ class ModelOrchestratorTests(unittest.TestCase):
         self.models = (
             "llama3.1:8b",
             "nomic-embed-text:latest",
-            "qwen2.5-coder:1.5b-base",
+            "qwen2.5-coder:1.5b",
+            "qwen3.5:4b",
             "qwen2.5-coder:7b",
             "deepseek-r1:32b",
             "deepseek-r1:8b",
@@ -32,18 +33,20 @@ class ModelOrchestratorTests(unittest.TestCase):
         self.assertEqual(route.model, "deepseek-r1:8b")
         self.assertNotIn("deepseek-r1:32b", route.considered)
 
-    def test_routes_general_chat_prefers_light_model(self):
+    def test_routes_general_chat_prefers_light_instruct_model(self):
         route = self.router.route(ModelPurpose.GENERAL)
-        # IGRIS elige el modelo ligero 1.5B para chat/conversacion; 7B queda
-        # reservado para programacion y razonamiento (seleccion dinamica).
-        self.assertEqual(route.model, "qwen2.5-coder:1.5b-base")
+        # Chat: instruct ligero primero (qwen3.5:4b); los modelos "-base" no
+        # estan instruidos y nunca son candidatos. 7B queda reservado para
+        # programacion y razonamiento (seleccion dinamica).
+        self.assertEqual(route.model, "qwen3.5:4b")
+        self.assertNotIn("base", route.model)
 
     def test_routes_dynamic_selection_by_task(self):
-        # El mismo enrutador elige 1.5B para chat y 7B para programacion: la
-        # eleccion es dinamica por tarea, no un modelo unico fijo.
+        # El mismo enrutador elige el instruct ligero para chat y 7B para
+        # programacion: la eleccion es dinamica por tarea, no unico fijo.
         general = self.router.route(ModelPurpose.GENERAL)
         programming = self.router.route(ModelPurpose.PROGRAMMING)
-        self.assertEqual(general.model, "qwen2.5-coder:1.5b-base")
+        self.assertEqual(general.model, "qwen3.5:4b")
         self.assertEqual(programming.model, "qwen2.5-coder:7b")
         self.assertIn("programacion", programming.reason)
 
@@ -71,14 +74,14 @@ class ModelOrchestratorTests(unittest.TestCase):
 
     def test_remote_fallback_never_replaces_a_safe_local_model(self):
         from unittest.mock import patch
-        self.client.models.return_value = ("qwen2.5-coder:1.5b-base", "moonshot/kimi-k3")
+        self.client.models.return_value = ("qwen2.5-coder:1.5b", "moonshot/kimi-k3")
         self.client._backend_for.return_value = ("ollama", "http://127.0.0.1:11434")
         with patch.dict("os.environ", {"IGRIS_ALLOW_CLOUD_MODELS": "1"}):
             with patch("igris_os.ai.resources.get_system_resources", return_value={
                 "ram_free_gb": 12.0, "vram_free_gb": 0.0, "uncertain": False,
             }):
                 route = self.router.route(ModelPurpose.PROGRAMMING)
-        self.assertEqual(route.model, "qwen2.5-coder:1.5b-base")
+        self.assertEqual(route.model, "qwen2.5-coder:1.5b")
         self.assertEqual(route.backend, "ollama")
         self.assertNotEqual(route.resources.get("execution_scope"), "external")
 
@@ -154,7 +157,7 @@ class ModelOrchestratorTests(unittest.TestCase):
         from unittest.mock import patch
         with patch('igris_os.ai.resources.get_system_resources') as mock_sys:
             mock_sys.return_value = {"ram_free_gb": 0.5, "vram_free_gb": 0.0, "uncertain": False}
-            route = self.router.route(ModelPurpose.PROGRAMMING, available=("qwen2.5-coder:7b", "qwen2.5-coder:1.5b-base"))
+            route = self.router.route(ModelPurpose.PROGRAMMING, available=("qwen2.5-coder:7b", "qwen2.5-coder:1.5b"))
         self.assertEqual(route.model, "")
         self.assertIn("no se fuerza fallback", route.reason)
         self.assertIsNone(route.fallback)
@@ -165,7 +168,7 @@ class ModelOrchestratorTests(unittest.TestCase):
         with patch('igris_os.ai.resources.get_system_resources', return_value={
             "ram_free_gb": 2.0, "vram_free_gb": 2.0, "uncertain": False,
         }):
-            route = self.router.route(ModelPurpose.PROGRAMMING, available=("qwen2.5-coder:1.5b-base",))
+            route = self.router.route(ModelPurpose.PROGRAMMING, available=("qwen2.5-coder:1.5b",))
         self.assertEqual(route.model, "")
 
     def test_small_fallback_is_selected_when_only_it_fits(self):
@@ -173,9 +176,9 @@ class ModelOrchestratorTests(unittest.TestCase):
         with patch('igris_os.ai.resources.get_system_resources', return_value={
             "ram_free_gb": 5.0, "vram_free_gb": 3.0, "uncertain": False,
         }):
-            route = self.router.route(ModelPurpose.PROGRAMMING, available=("qwen2.5-coder:7b", "qwen2.5-coder:1.5b-base"))
-        self.assertEqual(route.model, "qwen2.5-coder:1.5b-base")
-        self.assertEqual(route.fallback, "qwen2.5-coder:1.5b-base")
+            route = self.router.route(ModelPurpose.PROGRAMMING, available=("qwen2.5-coder:7b", "qwen2.5-coder:1.5b"))
+        self.assertEqual(route.model, "qwen2.5-coder:1.5b")
+        self.assertEqual(route.fallback, "qwen2.5-coder:1.5b")
 
     def test_auditable_routing_decision(self):
         self.client._backend_for.return_value = ("ollama", "http://127.0.0.1:11434")
@@ -227,9 +230,13 @@ class ModelOrchestratorTests(unittest.TestCase):
         snapshot = {"ram_free_gb": 64.0, "vram_free_gb": None, "uncertain": True}
         with patch("igris_os.ai.resources.get_system_resources", return_value=snapshot) as read_resources:
             self.router.route(ModelPurpose.PROGRAMMING, resource_snapshot=snapshot)
+            first_route_calls = self.client.model_metadata.call_count
             self.router.route(ModelPurpose.REVIEW, resource_snapshot=snapshot)
         read_resources.assert_not_called()
-        self.assertLessEqual(self.client.model_metadata.call_count, 5)
+        # Un unico fetch por modelo local razonable (nomic/kimi se filtran sin
+        # consultar) y la segunda ruta reutiliza la caché: cero refetch.
+        self.assertLessEqual(first_route_calls, len(self.models))
+        self.assertEqual(self.client.model_metadata.call_count, first_route_calls)
 
     def test_specialist_coordinator_does_not_bypass_an_unsafe_route(self):
         from unittest.mock import patch
