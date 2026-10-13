@@ -47,6 +47,10 @@ class _ProcessAIClient:
         limit = getattr(self._runner, 'output_token_limit', None)
         if limit is not None:
             options['output_limit'] = limit
+        else:
+            # Default to conversation output limit to prevent truncation
+            from igris_os.ai.ollama import _CONVERSATION_OUTPUT_LIMIT
+            options['output_limit'] = _CONVERSATION_OUTPUT_LIMIT
         result = self._runner.generate(prompt, **options)
         return ModelReply(
             ok=bool(result.get("ok")),

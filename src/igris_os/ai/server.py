@@ -353,7 +353,12 @@ class LlamaCppServer(OllamaServer):
         try:
             from igris_os.ai.resources import govern_server_process
             if self._proc.pid:
-                govern_server_process(self._proc.pid, priority="high")
+                # Prioridad "below_normal" por defecto: IGRIS no roba ciclos
+                # de CPU al usuario (el escritorio y otras apps tienen prioridad).
+                # Cambiar a "high" con IGRIS_SERVER_PRIORITY=high si se prefiere
+                # máxima fluidez de inferencia sobre ausencia de interferencia.
+                priority = os.environ.get("IGRIS_SERVER_PRIORITY", "below_normal")
+                govern_server_process(self._proc.pid, priority=priority)
         except Exception:
             # La gobernanza es opcional: nunca debe impedir el arranque.
             pass

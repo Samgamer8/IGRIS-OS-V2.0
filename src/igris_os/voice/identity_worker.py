@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -48,7 +49,7 @@ def synthesize(model, text: str, reference: Path, output: Path) -> None:
     # la semilla no basta si el patron de repeticion no depende del muestreo;
     # por eso cada reintento tambien endurece repetition_penalty, que es el
     # parametro que directamente castiga la repeticion causante del corte.
-    attempts = ((42, 1.2), (43, 1.35), (44, 1.5), (45, 1.65))
+    attempts = ((42, 1.2), (0, 1.5), (100, 2.0))  # Tres intentos: diferentes semillas y penalizacion creciente
     for seed, repetition_penalty in attempts:
         torch.manual_seed(seed)
         if torch.cuda.is_available():
@@ -74,7 +75,6 @@ def synthesize(model, text: str, reference: Path, output: Path) -> None:
             'La sintesis fallo en todas las semillas de reintento: ' + str(last_error))
     raise ValueError('La sintesis genero audio demasiado corto; no se reproducira una respuesta incompleta')
 
-
 def main() -> None:
     model = None
     for line in sys.stdin:
@@ -84,7 +84,16 @@ def main() -> None:
                 if model is None:
                     import torch
 
-                    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+                    # CPU: 6.1s por frase, sin cuelgues. CUDA en esta GPU
+                    # (RTX 5060 Ti) ralentiza el sampler hasta 4.4s/it al
+                    # arrancar y puede bloquearse. La voz personalizada de
+                    # IGRIS se conserva; solo cambia el dispositivo de cómputo.
+                    device = 'cpu'
+                    if torch.cuda.is_available():
+                        try:
+                            torch.set_num_threads(max(1, os.cpu_count() or 4))
+                        except (RuntimeError, AttributeError):
+                            pass
                     model = load_spanish_model(device)
                 synthesize(model, request['text'], Path(request['reference']), Path(request['output']))
             result = {'ok': True}

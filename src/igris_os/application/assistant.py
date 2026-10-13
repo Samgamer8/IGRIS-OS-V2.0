@@ -21,21 +21,22 @@ from igris_os.security.sandbox import JobObjectSandbox, SandboxRun
 
 PERSONALITY = """ESTILO DE IGRIS:
 - Responde siempre en espanol, salvo que el usuario pida otro idioma. No mezcles idiomas.
-- Estilo de mayordomo moderno: educado, sereno, firme, servicial y con criterio propio.
-- Trata al usuario de usted por defecto, sin solemnidad excesiva; adapta el trato si lo pide.
-- No repitas 'senor' ni formulas de obediencia en cada frase. Tu identidad es IGRIS, no JARVIS.
-- Se sincero y directo. No des la razon por complacer ni adules al usuario.
-- Si discrepas, explica brevemente el motivo y ofrece una alternativa concreta.
-- Reconoce los errores y la incertidumbre sin excusas, dramatismo ni falsas promesas.
-- No ocultes ni maquilles errores al usuario, aunque te lo pida. Informale y propone corregirlos.
-- Usa humor seco solo de forma ocasional y nunca ante un fallo serio o una preocupacion del usuario.
+- Eres un programador senior de multiples dominios: Python, C++, GDScript, scripts de
+  Windows, bases de datos, herramientas de audio e Inteligencia Artificial.
+- Hablas con el usuario como a un companero técnico: directo, sin florituras ni sumision.
+  No digas "a sus ordenes" ni "sera servido" en cada respuesta. Eres IGRIS, no un mayordomo.
+- Se sincero y directo. No adules al usuario ni le des la razon por complacer.
+- Si una idea puede fallar, lo dices al principio y propones alternativas con los trade-offs.
+- Reconoce errores e incertidumbre sin excusas, dramatismo ni falsas promesas.
+- No ocultes ni maquilles errores; informale y propone la correccion.
+- Usa humor seco solo de forma ocasional y nunca ante un fallo serio o una preocupacion.
 - Contesta con dos a cuatro frases cuando baste; amplia solo si la pregunta o el trabajo lo requiere.
 - No conviertas cada respuesta en una lista, un informe o una oferta de ayuda repetida.
 - Distingue los hechos comprobados de las suposiciones y de las acciones pendientes.
 """
 
 
-SYSTEM = """Eres IGRIS OS. Eres un sistema productivo de creación y un operador local seguro.
+SYSTEM = """Eres IGRIS OS. Eres un programador senior de multiples dominios y operador local seguro.
 """ + PERSONALITY + """
 
 TONO:
@@ -370,15 +371,18 @@ class AssistantService:
                 'El chat no ha generado ni guardado ningun archivo; no voy a prometer una entrega desde esta respuesta.',
                 'local', backend='local', data={'requires_execution': True})
 
+        # Preguntas de "qué puedes hacer" / "qué haces": respuesta concisa y natural,
+        # sin llamar al LLM y sin volcar el catálogo de funciones.
+        decision = classify_intent(objective)
+        if decision.kind == "capability":
+            return self._capability_response(objective)
+
         # Fast-path para saludos conocidos: sin llamar al LLM. Devuelve el texto
         # preformateado inmediatamente y evita que el modelo se descargue de VRAM
         # tras la inactividad, con lo que la respuesta y la voz son instantáneos.
-        if lower in (_GREETING_CANNED):
-            with open("runtime/logs/greeting_debug.log", "a", encoding="utf-8") as _dbg:
-
-                canned = _GREETING_CANNED[lower]
-
-            canned = _GREETING_CANNED[lower]
+        normalized_greeting = normalize_intent(lower)
+        if normalized_greeting in _GREETING_CANNED:
+            canned = _GREETING_CANNED[normalized_greeting]
             self.state.add_conversation_turn("user", objective.strip())
             self.state.add_conversation_turn("assistant", canned)
             data = self._model_route_data()
@@ -465,6 +469,23 @@ class AssistantService:
                               getattr(reply, "reasoning", ""),
                               self._model_route_data())
 
+    def _capability_response(self, objective: str) -> AssistantReply:
+        """Respuesta concisa a preguntas de capacidades: natural y con ejemplos,
+        sin volcar listas de funciones. No pasa por el LLM para no cansar al
+        usuario con un catalogo de 45 items."""
+        text = (
+            "Soy IGRIS OS. Soy un copiloto de programacion y operador local: te ayudo a "
+            "conversar, a escribir y revisar codigo en varios lenguajes, a refactorizar y "
+            "mantener proyectos y archivos, y a montar prototipos rapidos con Godot. "
+            "Tambien me encargo de tareas de Windows y multimedia cuando las pides. "
+            "Antes de tocar algo importante te aviso y pido permiso, y si algo no esta "
+            "disponible en este equipo lo digo sin rodeos. Respondo por voz si el audio "
+            "local esta activo. Si me cuentas en que trabajas, empezamos cuando quieras."
+        )
+        self.state.add_conversation_turn("user", objective.strip())
+        self.state.add_conversation_turn("assistant", text)
+        return AssistantReply(True, text, "local", 0, "local")
+
     @staticmethod
     def _is_conversation(text: str) -> bool:
         return is_conversational_input(text)
@@ -475,9 +496,18 @@ class AssistantService:
         return bool(
             re.search(
                 r"\b(?:quien eres|que eres|que (?:me )?puedes decir de ti|"
-                r"hablame de ti|cuentame(?: un poco)? (?:sobre|de) ti|para que (?:te )?"
-                r"(?:crearon|estas creado|estas creada|fuiste creado|fuiste creada)|"
-                r"para que sirves)\b",
+                r"hablame de ti|cuentame(?: un poco)? (?:sobre|de) ti|"
+                r"para que (?:te )?(?:crearon|estas creado|estas creada|"
+                r"fuiste creado|fuiste creada)|"
+                r"para que sirves|"
+                r"que haces|que es lo que haces|"
+                r"que eres capaz de (?:hacer|ayudarme)|"
+                r"cuales (?:son )?(?:tus )?(?:funciones|capacidades|herramientas)|"
+                r"que sabes hacer|cuanto sabes hacer|"
+                r"para que me sirve|que puedes hacer(?:\s+(?:en este ordenador|aqui|conmigo|por (?:mi|mí)))?"
+                r"|cual es tu proposito|"
+                r"explicame (?:un poco (?:sobre|de) )?ti|"
+                r"dime (?:un poco (?:sobre|de) )?ti)\b",
                 normalized,
             )
             or re.search(

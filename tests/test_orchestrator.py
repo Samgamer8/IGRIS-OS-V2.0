@@ -32,9 +32,20 @@ class ModelOrchestratorTests(unittest.TestCase):
         self.assertEqual(route.model, "deepseek-r1:8b")
         self.assertNotIn("deepseek-r1:32b", route.considered)
 
-    def test_routes_general_chat_to_general_model(self):
+    def test_routes_general_chat_prefers_light_model(self):
         route = self.router.route(ModelPurpose.GENERAL)
-        self.assertEqual(route.model, "llama3.1:8b")
+        # IGRIS elige el modelo ligero 1.5B para chat/conversacion; 7B queda
+        # reservado para programacion y razonamiento (seleccion dinamica).
+        self.assertEqual(route.model, "qwen2.5-coder:1.5b-base")
+
+    def test_routes_dynamic_selection_by_task(self):
+        # El mismo enrutador elige 1.5B para chat y 7B para programacion: la
+        # eleccion es dinamica por tarea, no un modelo unico fijo.
+        general = self.router.route(ModelPurpose.GENERAL)
+        programming = self.router.route(ModelPurpose.PROGRAMMING)
+        self.assertEqual(general.model, "qwen2.5-coder:1.5b-base")
+        self.assertEqual(programming.model, "qwen2.5-coder:7b")
+        self.assertIn("programacion", programming.reason)
 
     def test_cloud_and_embedding_models_are_never_candidates(self):
         route = self.router.route(ModelPurpose.GENERAL)

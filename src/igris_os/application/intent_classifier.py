@@ -104,21 +104,8 @@ _ADVICE_PREFIXES = (
     "me explicas ", "puedes explicarme ",
 )
 
-_GREETING_CANNED = {
-    "hola": "Hola. Soy IGRIS OS, tu asistente de programación local. ¿En qué puedo ayudarte?",
-    "hola!": "Hola. Soy IGRIS OS, tu asistente de programación local. ¿En qué puedo ayudarte?",
-    "hola?": "Hola. Soy IGRIS OS, tu asistente de programación local. ¿En qué puedo ayudarte?",
-    "buenos dias": "Buenos días. ¿En qué puedo ayudarte hoy? Estoy a tu disposición.",
-    "buenas tardes": "Buenas tardes. ¿En qué puedo ayudarte hoy? Estoy a tu disposición.",
-    "buenas noches": "Buenas noches. ¿En qué puedo ayudarte? Estoy a tu disposición.",
-    "buenas": "Buenas. ¿En qué puedo ayudarte? Estoy a tu disposición.",
-    "que tal": "¡Qué tal! ¿En qué puedo ayudarte? Estoy a tu disposición.",
-    "gracias": "¡De nada! ¿Hay algo más en lo que pueda ayudarte?",
-    "ok": "Ok. ¿En qué puedo ayudarte?",
-    "perfecto": "Perfecto. ¿En qué puedo ayudarte?",
-    "de acuerdo": "De acuerdo. ¿En qué puedo ayudarte?",
-    "entendido": "Entendido. ¿En qué puedo ayudarte?",
-}
+_GREETING_CANNED = {}  # DESACTIVADO: sin frases preestablecidas; que responda el LLM como humano
+
 
 _GREETING_RE = re.compile(
     r"^(?:(?:hola|buenas|buenos dias|buenas tardes|buenas noches|que tal|"

@@ -38,6 +38,13 @@ class ModelOrchestrator:
     El limite de parametros evita elegir por accidente modelos grandes como
     DeepSeek-R1 32B en este perfil local. Puede cambiarse con
     ``IGRIS_ORCHESTRATOR_MAX_PARAMS_B`` tras medir el hardware.
+
+    Los propósitos comparten una cola de candidatos y se ordenan segun el
+    objetivo: 1.5B primero para chat/conversacion (consumo minimo, velocidad
+    maxima) y 7B/8B primero para programacion, razonamiento y revision
+    (calidad). El enrutador cruza este orden con los modelos instalados y la
+    aptitud de recursos, asi que el modelo elegido puede variar segun el
+    hardware.
     """
 
     CANDIDATES: dict[ModelPurpose, tuple[str, ...]] = {
@@ -57,8 +64,8 @@ class ModelOrchestrator:
             "qwen2.5-coder:1.5b", "qwen2.5-coder:1.5b-base",
         ),
         ModelPurpose.GENERAL: (
+            "qwen2.5-coder:1.5b-base", "qwen2.5-coder:1.5b",
             "llama3.1:8b", "qwen2.5-coder:7b", "deepseek-r1:8b",
-            "qwen2.5-coder:1.5b", "qwen2.5-coder:1.5b-base",
         ),
     }
 

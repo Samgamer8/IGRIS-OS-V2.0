@@ -63,7 +63,7 @@ class VoiceIdentityTests(unittest.TestCase):
                 with patch.object(voice, '_synthesize', side_effect=RuntimeError('Fallo')):
                     voice._play_response('Primera frase.', root, play)
                 play.assert_not_called()
-                self.assertIn('No se pudo generar un fragmento de voz', voice.events.get_nowait())
+                self.assertIn('Error de voz personalizada', voice.events.get_nowait())
             finally:
                 voice.close()
 
@@ -86,7 +86,7 @@ class VoiceIdentityTests(unittest.TestCase):
                 # La primera frase falla y se omite, pero la segunda se reproduce
                 # igualmente: un fragmento degenerado no silencia toda la respuesta.
                 self.assertEqual(played, ['speech_1.wav'])
-                self.assertIn('fragmento de voz', voice.events.get_nowait())
+                self.assertIn('Error de voz personalizada', voice.events.get_nowait())
             finally:
                 voice.close()
 
@@ -140,7 +140,7 @@ class VoiceIdentityTests(unittest.TestCase):
             with patch.dict('sys.modules', {'soundfile': soundfile, 'torch': torch}):
                 synthesize(model, 'Una respuesta con varias palabras.', reference, Path(directory) / 'speech.wav')
             self.assertEqual(model.generate.call_count, 2)
-            self.assertEqual([call.args[0] for call in torch.manual_seed.call_args_list], [42, 43])
+            self.assertEqual([call.args[0] for call in torch.manual_seed.call_args_list], [42, 0])
             soundfile.write.assert_called_once()
 
     def test_repeated_short_audio_fails_with_bounded_retries(self):
@@ -153,7 +153,7 @@ class VoiceIdentityTests(unittest.TestCase):
             with patch.dict('sys.modules', {'soundfile': soundfile, 'torch': Mock()}):
                 with self.assertRaisesRegex(ValueError, 'demasiado corto'):
                     synthesize(model, 'Una respuesta con varias palabras.', reference, Path(directory) / 'speech.wav')
-            self.assertEqual(model.generate.call_count, 4)
+            self.assertEqual(model.generate.call_count, 3)
             soundfile.write.assert_not_called()
 
     def test_degenerate_seed_is_skipped_instead_of_failing_the_whole_request(self):
@@ -188,7 +188,7 @@ class VoiceIdentityTests(unittest.TestCase):
             with patch.dict('sys.modules', {'soundfile': soundfile, 'torch': Mock()}):
                 with self.assertRaisesRegex(ValueError, 'todas las semillas'):
                     synthesize(model, 'Una respuesta con varias palabras.', reference, Path(directory) / 'speech.wav')
-            self.assertEqual(model.generate.call_count, 4)
+            self.assertEqual(model.generate.call_count, 3)
             soundfile.write.assert_not_called()
 
     def test_missing_reference_is_not_replaced_by_another_voice(self):

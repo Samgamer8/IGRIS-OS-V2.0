@@ -192,5 +192,38 @@ class SharedServerRegistryTests(unittest.TestCase):
             self.assertEqual(results, [True, True])
 
 
+    def test_native_server_below_normal_priority_by_default(self):
+        """El servidor arranca en below_normal por defecto para no interferir
+        con la experiencia de usuario (prioridad 'high' era la anterior)."""
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = root / 'llama-server.exe'
+            executable.touch()
+            model = root / 'model.gguf'
+            model.write_bytes(b'GGUF')
+            native = server.LlamaCppServer(executable, model, 'http://127.0.0.1:30000')
+            process = Mock()
+            process.poll.return_value = None
+            govern_mock = Mock()
+            with patch.object(server, '_probe_vram_free_mib', return_value=8000), patch.object(native, 'is_running', side_effect=[False, True]), patch('igris_os.ai.resources.govern_server_process', govern_mock), patch('subprocess.Popen', return_value=process):
+                self.assertTrue(native.start())
+            govern_mock.assert_called_once_with(process.pid, priority="below_normal")
+
+    def test_native_server_high_priority_overridable_via_env(self):
+        """IGRIS_SERVER_PRIORITY=high devuelve la prioridad alta si se desea."""
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = root / 'llama-server.exe'
+            executable.touch()
+            model = root / 'model.gguf'
+            model.write_bytes(b'GGUF')
+            native = server.LlamaCppServer(executable, model, 'http://127.0.0.1:30000')
+            process = Mock()
+            process.poll.return_value = None
+            govern_mock = Mock()
+            with patch.object(server, '_probe_vram_free_mib', return_value=8000), patch.dict('os.environ', {'IGRIS_SERVER_PRIORITY': 'high'}), patch.object(native, 'is_running', side_effect=[False, True]), patch('igris_os.ai.resources.govern_server_process', govern_mock), patch('subprocess.Popen', return_value=process):
+                self.assertTrue(native.start())
+            govern_mock.assert_called_once_with(process.pid, priority="high")
+
 if __name__ == '__main__':
     unittest.main()

@@ -85,8 +85,11 @@ class AssistantPersonalityTests(unittest.TestCase):
             }):
                 # El fast-path de saludo no necesita modelo: solo peticiones
                 # conversacionales reales deben fallar claramente sin modelo apto.
+                # Sin frases enlatadas, un saludo sin modelo apto tambien falla
+                # claramente: el LLM responde como humano, no hay cache.
                 greeting = assistant.respond('Hola')
-        self.assertTrue(greeting.ok)
+        self.assertFalse(greeting.ok)
+        self.assertIn('modelo local apto', greeting.text)
         assistant.client.generate.assert_not_called()
         # Una petición conversacional real (no saludo) sí falla claramente
         # sin un modelo local apto.
@@ -114,8 +117,8 @@ class AssistantPersonalityTests(unittest.TestCase):
         prompt = AssistantService._conversation_prompt(
             'No estoy de acuerdo.', ('user: Una idea anterior.',))
         self.assertIn(PERSONALITY, prompt)
-        self.assertIn('con criterio propio', prompt)
-        self.assertIn('No des la razon por complacer', prompt)
+        self.assertIn('programador senior de multiples dominios', prompt)
+        self.assertIn('la razon por complacer', prompt)
         self.assertIn('Responde siempre en espanol', prompt)
         self.assertIn('No ocultes ni maquilles errores', prompt)
         self.assertIn('user: Una idea anterior.', prompt)
